@@ -21,7 +21,6 @@ function chainCallback(object, property, callback) {
 app.registerExtension({
     name: "Comfy.ComfyLLama.MediaPathsLoader",
     async beforeRegisterNodeDef(nodeType, nodeData, app) {
-        // console.log("beforeRegisterNodeDef called for:", nodeData.name); // Removed noisy log
         if (nodeData.name === "MediaPathsLoader") {
             console.log("Registering MediaPathsLoader extension...");
 
@@ -29,13 +28,9 @@ app.registerExtension({
                 console.log("MediaPathsLoader node created, adding widgets...");
             });
 
-            // Capture widgets_values during configure so we can create matching widgets
-            // when the node is actually created. This avoids ordering issues when ComfyUI
-            // restores widget values from a saved workflow.
             chainCallback(nodeType.prototype, "configure", function (info) {
                 try {
                     if (info && info.widgets_values) {
-                        // store for onNodeCreated to consume
                         this._mediaPathsLoader_pending_widgets = info.widgets_values;
                     }
                 } catch (e) {
@@ -44,7 +39,6 @@ app.registerExtension({
             });
 
             chainCallback(nodeType.prototype, "onNodeCreated", function () {
-                // Define the add callback
                 const addCallback = () => {
                     const pathWidgets = this.widgets.filter(w => w.name && w.name.startsWith("path_"));
                     const nextIndex = pathWidgets.length + 1;
@@ -53,38 +47,39 @@ app.registerExtension({
                     }
                 };
 
-                // Add '+' button at the top
                 const addButton = this.addWidget("button", "+", "", addCallback);
                 addButton.serialize = false;
 
-                // helper: create a single inline custom widget containing text + Browse + Remove
                 function addPathWidget(index, initialValue) {
                     const name = `path_${index}`;
                     const widget = this.addWidget("custom", name, initialValue || "", null);
                     widget.serialize = true;
-                    // ensure widget knows its node (some environments may not set this immediately)
                     widget.node = this;
                     widget.name = name;
                     widget.value = initialValue || "";
 
-                    // sizes for parts
+                    // Constants
                     const margin = 12;
                     const removeW = 20;
 
+                    // Ensure the widget takes up the full width of the node
                     widget.computeSize = function (width) {
                         return [width, LiteGraph.NODE_WIDGET_HEIGHT];
                     };
 
                     widget.draw = function (ctx, node, width, y, height) {
                         this.last_y = y;
-                        const totalW = width - margin * 2;
-                        // merged area: text + implicit browse behaviour
-                        const textW = totalW - (removeW + 4);
+                        
+                        // --- VISUALS ---
+                        // Calculate positions anchored to the RIGHT side
+                        // This ensures the X button is always in the same spot regardless of text length
+                        const removeX = width - margin - removeW;
+                        const textW = removeX - margin - 4; 
                         const textX = margin;
                         const textY = y + 2;
                         const textH = height - 4;
 
-                        // text area background — use roundRect when available, fallback to rect
+                        // 1. Draw Text Background
                         ctx.save();
                         ctx.fillStyle = LiteGraph.WIDGET_BGCOLOR;
                         if (typeof ctx.roundRect === "function") {
@@ -95,59 +90,32 @@ app.registerExtension({
                             ctx.fillRect(textX, textY, textW, textH);
                         }
 
-                        // text: show placeholder (path_index) when empty
+                        // 2. Draw Text
                         ctx.fillStyle = LiteGraph.WIDGET_TEXT_COLOR;
                         ctx.textBaseline = "middle";
                         ctx.textAlign = "left";
-                        // Resolve the display text from the widget value robustly.
+                        
                         let textVal = name;
                         if (typeof this.value === "string") {
                             textVal = this.value.length ? this.value : name;
                         } else if (this.value && typeof this.value === "object") {
-                            textVal = this.value.name || this.value.file || this.value.path || (Array.isArray(this.value) ? this.value.join(", ") : "");
-                            if (!textVal || textVal === "[object Object]") {
-                                // Try to find any string property on the object
-                                for (const k of Object.keys(this.value)) {
-                                    const v = this.value[k];
-                                    if (typeof v === "string" && v.length) {
-                                        textVal = v;
-                                        break;
-                                    }
-                                }
-                            }
-                            if (!textVal) textVal = name;
+                            textVal = this.value.name || this.value.file || this.value.path || name;
                         }
 
-                        // Clip to text area so overflowing text won't draw over the widget background
+                        // Clip Text
                         const clipX = textX + 8;
                         const clipW = Math.max(0, textW - 16);
-                        if (clipW > 8) {
-                            ctx.save();
-                            ctx.beginPath();
-                            ctx.rect(clipX, textY, clipW, textH);
-                            ctx.clip();
+                        
+                        ctx.save();
+                        ctx.beginPath();
+                        ctx.rect(clipX, textY, clipW, textH);
+                        ctx.clip();
+                        
+                        // Simple text drawing
+                        ctx.fillText(String(textVal), textX + 8, textY + textH / 2);
+                        ctx.restore();
 
-                            // Ellipsize if needed (guard measureText)
-                            let drawText = String(textVal);
-                            try {
-                                if (ctx.measureText && ctx.measureText(drawText).width > clipW) {
-                                    while (drawText.length > 0 && ctx.measureText(drawText + "…").width > clipW) {
-                                        drawText = drawText.slice(0, -1);
-                                    }
-                                    drawText = drawText + "…";
-                                }
-                            } catch (e) {
-                                // measureText may fail in some contexts; fall back to raw string
-                            }
-                            ctx.fillText(drawText, textX + 8, textY + textH / 2);
-                            ctx.restore();
-                        } else {
-                            // Not enough room to clip — draw a short placeholder
-                            ctx.fillText(name, textX + 8, textY + textH / 2);
-                        }
-
-                        // Remove (×) button (smaller) — use roundRect when available
-                        const removeX = textX + textW + 4;
+                        // 3. Draw Remove Button
                         ctx.fillStyle = "#2b2b2b";
                         if (typeof ctx.roundRect === "function") {
                             ctx.beginPath();
@@ -165,51 +133,53 @@ app.registerExtension({
 
                     widget.mouse = function (event, pos, node) {
                         if (!this.last_y) this.last_y = 0;
-                        const localX = pos[0];
-                        const localY = pos[1] - this.last_y;
-                        const margin = 12;
-                        const removeW = 20;
-                        const totalW = node.size[0] - margin * 2;
-                        const textW = totalW - (removeW + 4);
-                        const textX = margin;
-                        const textY = 2;
-                        const textH = LiteGraph.NODE_WIDGET_HEIGHT - 4;
-
-                        const removeX = textX + textW + 4;
+                        
+                        const x = pos[0];
+                        const y = pos[1] - this.last_y;
+                        const widgetHeight = LiteGraph.NODE_WIDGET_HEIGHT;
+                        
+                        // Use current node width to find button position (Right Anchor)
+                        const nodeWidth = node.size[0];
+                        const removeX = nodeWidth - margin - removeW;
+                        const textMaxX = removeX - 4;
 
                         if (event.type === "pointerdown") {
-                            // click remove
-                            if (localX >= removeX && localX <= removeX + removeW && localY >= textY && localY <= textY + textH) {
+                            
+                            // --- INTERACTION 1: REMOVE ---
+                            // We removed the strict 'y' check to make clicking easier
+                            if (x >= removeX && x <= (removeX + removeW) && y >= 0 && y <= widgetHeight) {
                                 const pathWidgets = this.node.widgets.filter(w => w.name && w.name.startsWith("path_"));
                                 if (pathWidgets.length > 2) {
                                     const idx = this.node.widgets.indexOf(this);
                                     if (idx !== -1) {
+                                        // 1. Remove Widget
                                         this.node.widgets.splice(idx, 1);
-                                        // Recompute node height only, preserve current width
-                                        const curWidth = Array.isArray(this.node.size)
-                                            ? this.node.size[0]
-                                            : (typeof this.node.size === "number" ? this.node.size : undefined);
-                                        const computed = this.node.computeSize(curWidth || undefined);
-                                        if (computed && computed[1] != null) {
-                                            this.node.size = [curWidth || (computed[0] || 0), computed[1]];
-                                        }
+                                        
+                                        // 2. Re-index Names (path_3 -> path_2)
+                                        const remaining = this.node.widgets.filter(w => w.name && w.name.startsWith("path_"));
+                                        remaining.forEach((w, i) => {
+                                            w.name = `path_${i + 1}`;
+                                        });
+
+                                        // 3. DO NOT RESIZE
+                                        // We deleted the code that calls computeSize and sets this.node.size
+                                        // The node will keep its current Width and Height.
+                                        
                                         this.node.setDirtyCanvas(true, true);
                                     }
                                 }
                                 return true;
                             }
 
-                            // click text area -> browse (unless shift-click to edit text)
-                            if (localX >= textX && localX <= textX + textW && localY >= textY && localY <= textY + textH) {
+                            // --- INTERACTION 2: BROWSE/EDIT ---
+                            if (x >= margin && x <= textMaxX && y >= 0 && y <= widgetHeight) {
                                 if (event.shiftKey) {
-                                    // open text prompt to edit value
                                     app.canvas.prompt("Path", this.value || "", (v) => {
                                         this.value = v;
                                         this.node.setDirtyCanvas(true, true);
                                     }, event);
                                     return true;
                                 }
-                                // browse
                                 const input = document.createElement("input");
                                 input.type = "file";
                                 input.style.display = "none";
@@ -229,17 +199,14 @@ app.registerExtension({
                     };
                 }
 
-                // If we have pending widgets from a saved workflow, recreate them now.
+                // Initialization Logic
                 if (this._mediaPathsLoader_pending_widgets && Array.isArray(this._mediaPathsLoader_pending_widgets) && this._mediaPathsLoader_pending_widgets.length) {
                     for (let i = 0; i < this._mediaPathsLoader_pending_widgets.length && i < 8; i++) {
                         const v = this._mediaPathsLoader_pending_widgets[i];
-                        // the saved widget value might be a string or an object; pass it through
                         addPathWidget.call(this, i + 1, typeof v === 'string' ? v : v);
                     }
-                    // cleanup
                     delete this._mediaPathsLoader_pending_widgets;
                 } else {
-                    // Create initial 2 path widgets
                     for (let i = 1; i <= 2; i++) {
                         addPathWidget.call(this, i, "");
                     }
@@ -247,7 +214,7 @@ app.registerExtension({
 
                 console.log("MediaPathsLoader widgets setup complete");
 
-                // Refresh the node display while preserving user-resized width
+                // Initial size setup is still okay to ensure it starts clean
                 const curWidth = Array.isArray(this.size) ? this.size[0] : (typeof this.size === "number" ? this.size : 0);
                 const curHeight = Array.isArray(this.size) ? this.size[1] : LiteGraph.NODE_WIDGET_HEIGHT || 0;
                 const computed = this.computeSize(curWidth || undefined);
