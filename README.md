@@ -14,13 +14,50 @@ Usage:
  - For single media: Connect an IMAGE tensor to `image` input, AUDIO tensor to `audio` input.
  - Set `llama_cpp_folder` to the path containing llama-cli.exe and llama-mtmd-cli.exe (required).
 
+## Nodes
+
+### ComfyLLama (llama.cpp)
+Core inference node for llama.cpp-based text generation with optional multimodal support (images/audio).
+
+**Key Inputs:**
+- `text`: Prompt string
+- `gguf_model`: GGUF model file (connect from GGUF Loader)
+- `llama_cpp_folder`: Path to llama-cli.exe and llama-mtmd-cli.exe
+- Optional: `image` (single IMAGE tensor), `audio` (single AUDIO), `media_paths` (multiple paths from Media Paths Loader), `mmproj_model` (multimodal projector)
+
+**Outputs:** Generated text (STRING)
+
+**Example Workflow:**
+```
+[GGUF Loader] --> [ComfyLLama]
+[Media Paths Loader] --> [ComfyLLama (media_paths)]
+```
+
+### GGUF Loader (llama.cpp)
+Loads GGUF model files from ComfyUI's models directory.
+
+**Inputs:**
+- `gguf_name`: Dropdown of discovered .gguf files
+- Optional: `gguf_path_override`: Custom file path
+
+**Outputs:** MODEL (dict with file path)
+
+### Media Paths Loader (llama.cpp)
+Combines multiple file paths into a list for batch media processing.
+
+**Inputs:** Dynamic path inputs (path_0, path_1, etc. - add via node UI)
+
+**Outputs:** List of paths (PATH)
+
+**Example:** Add multiple image/audio file paths, connect to ComfyLLama's `media_paths` for multimodal inference with several files.
+
 Inputs & Multimodal behavior:
 - Required: `llama_cpp_folder` (STRING) - path to folder containing llama-cli.exe and llama-mtmd-cli.exe
 - Separate inputs for different media types:
 	 - `image` (IMAGE) — single image tensor.
 	 - `audio` (AUDIO) — single audio tensor or dict.
 	 - `media_paths` (PATH) — multiple paths (use MediaPathsLoader for flexible input).
-- Only one single media input (image or audio) can be used at a time, and cannot combine with media_paths.
+- Single media inputs (`image` or `audio`) are limited to one each and cannot be combined with `media_paths`. Use `media_paths` (via MediaPathsLoader) for multiple media files, as the underlying CLI supports repeated `--image` and `--audio` flags.
 - Supported media: images (.png, .jpg, etc.) and audio (.wav, .mp3, etc.).
 - If one or more images or audio files are provided (or `mmproj` is set), ComfyLLama will use `llama-mtmd-cli` for multimodal inference. In this strict mode the node will fail with a clear message if `llama-mtmd-cli` is not installed or not found in `llama_cpp_folder`.
 - If no image/audio/mmproj is provided, the node will use the text-only `llama-cli`.
