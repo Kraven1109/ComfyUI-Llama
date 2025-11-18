@@ -50,7 +50,6 @@ app.registerExtension({
                     // sizes for parts
                     const margin = 12;
                     const removeW = 20;
-                    const browseW = 56;
 
                     widget.computeSize = function (width) {
                         return [width, LiteGraph.NODE_WIDGET_HEIGHT];
@@ -59,7 +58,8 @@ app.registerExtension({
                     widget.draw = function (ctx, node, width, y, height) {
                         this.last_y = y;
                         const totalW = width - margin * 2;
-                        const textW = totalW - (browseW + removeW + 8);
+                        // merged area: text + implicit browse behaviour
+                        const textW = totalW - (removeW + 4);
                         const textX = margin;
                         const textY = y + 2;
                         const textH = height - 4;
@@ -70,24 +70,15 @@ app.registerExtension({
                         ctx.roundRect(textX, textY, textW, textH, [textH * 0.5]);
                         ctx.fill();
 
-                        // text
+                        // text: show placeholder (path_index) when empty
                         ctx.fillStyle = LiteGraph.WIDGET_TEXT_COLOR;
                         ctx.textBaseline = "middle";
                         ctx.textAlign = "left";
-                        const textVal = this.value || "";
+                        const textVal = this.value && this.value.length ? this.value : name;
                         ctx.fillText(textVal, textX + 8, textY + textH / 2);
 
-                        // Browse button
-                        const browseX = textX + textW + 4;
-                        ctx.fillStyle = "#2b2b2b";
-                        ctx.roundRect(browseX, textY, browseW, textH, [4]);
-                        ctx.fill();
-                        ctx.fillStyle = "#ddd";
-                        ctx.textAlign = "center";
-                        ctx.fillText("Browse", browseX + browseW / 2, textY + textH / 2);
-
                         // Remove (×) button (smaller)
-                        const removeX = browseX + browseW + 4;
+                        const removeX = textX + textW + 4;
                         ctx.fillStyle = "#2b2b2b";
                         ctx.roundRect(removeX, textY, removeW, textH, [4]);
                         ctx.fill();
@@ -104,19 +95,38 @@ app.registerExtension({
                         const localY = pos[1] - this.last_y;
                         const margin = 12;
                         const removeW = 20;
-                        const browseW = 56;
                         const totalW = node.size[0] - margin * 2;
-                        const textW = totalW - (browseW + removeW + 8);
+                        const textW = totalW - (removeW + 4);
                         const textX = margin;
                         const textY = 2;
                         const textH = LiteGraph.NODE_WIDGET_HEIGHT - 4;
 
-                        // click inside browse
-                        const browseX = textX + textW + 4;
-                        const removeX = browseX + browseW + 4;
+                        const removeX = textX + textW + 4;
 
                         if (event.type === "pointerdown") {
-                            if (localX >= browseX && localX <= browseX + browseW && localY >= textY && localY <= textY + textH) {
+                            // click remove
+                            if (localX >= removeX && localX <= removeX + removeW && localY >= textY && localY <= textY + textH) {
+                                const pathWidgets = this.node.widgets.filter(w => w.name && w.name.startsWith("path_"));
+                                if (pathWidgets.length > 2) {
+                                    const idx = this.node.widgets.indexOf(this);
+                                    if (idx !== -1) {
+                                        this.node.widgets.splice(idx, 1);
+                                        this.node.setSize(this.node.computeSize());
+                                    }
+                                }
+                                return true;
+                            }
+
+                            // click text area -> browse (unless shift-click to edit text)
+                            if (localX >= textX && localX <= textX + textW && localY >= textY && localY <= textY + textH) {
+                                if (event.shiftKey) {
+                                    // open text prompt to edit value
+                                    app.canvas.prompt("Path", this.value || "", (v) => {
+                                        this.value = v;
+                                        this.node.setDirtyCanvas(true, true);
+                                    }, event);
+                                    return true;
+                                }
                                 // browse
                                 const input = document.createElement("input");
                                 input.type = "file";
@@ -130,26 +140,6 @@ app.registerExtension({
                                     this.node.setDirtyCanvas(true, true);
                                 };
                                 input.click();
-                                return true;
-                            }
-                            // remove
-                            if (localX >= removeX && localX <= removeX + removeW && localY >= textY && localY <= textY + textH) {
-                                const pathWidgets = this.node.widgets.filter(w => w.name && w.name.startsWith("path_"));
-                                if (pathWidgets.length > 2) {
-                                    const idx = this.node.widgets.indexOf(this);
-                                    if (idx !== -1) {
-                                        this.node.widgets.splice(idx, 1);
-                                        this.node.setSize(this.node.computeSize());
-                                    }
-                                }
-                                return true;
-                            }
-                            // click text -> prompt edit
-                            if (localX >= textX && localX <= textX + textW && localY >= textY && localY <= textY + textH) {
-                                app.canvas.prompt("Path", this.value || "", (v) => {
-                                    this.value = v;
-                                    this.node.setDirtyCanvas(true, true);
-                                }, event);
                                 return true;
                             }
                         }
