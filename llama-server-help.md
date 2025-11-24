@@ -25,7 +25,8 @@
 --poll-batch <0|1>                      use polling to wait for work (default: same as --poll)
 -c,    --ctx-size N                     size of the prompt context (default: 4096, 0 = loaded from model)
                                         (env: LLAMA_ARG_CTX_SIZE)
--n,    --predict, --n-predict N         number of tokens to predict (default: -1, -1 = infinity)
+-n,    --predict, --n-predict N         number of tokens to predict (default: -1, -1 = infinity, -2 = until
+                                        context filled)
                                         (env: LLAMA_ARG_N_PREDICT)
 -b,    --batch-size N                   logical maximum batch size (default: 2048)
                                         (env: LLAMA_ARG_BATCH)
@@ -219,7 +220,7 @@
                                         edskypmxt)
 --ignore-eos                            ignore end of stream token and continue generating (implies
                                         --logit-bias EOS-inf)
---temp N                                temperature (default: 0.2)
+--temp N                                temperature (default: 0.8)
 --top-k N                               top-k sampling (default: 40, 0 = disabled)
 --top-p N                               top-p sampling (default: 0.9, 1.0 = disabled)
 --min-p N                               min-p sampling (default: 0.1, 0.0 = disabled)
@@ -265,25 +266,54 @@
 
 ----- example-specific params -----
 
---mmproj FILE                           path to a multimodal projector file. see tools/mtmd/README.md
-                                        note: if -hf is used, this argument can be omitted
-                                        (env: LLAMA_ARG_MMPROJ)
---mmproj-url URL                        URL to a multimodal projector file. see tools/mtmd/README.md
-                                        (env: LLAMA_ARG_MMPROJ_URL)
---no-mmproj                             explicitly disable multimodal projector, useful when using -hf
-                                        (env: LLAMA_ARG_NO_MMPROJ)
---no-mmproj-offload                     do not offload multimodal projector to GPU
-                                        (env: LLAMA_ARG_NO_MMPROJ_OFFLOAD)
---image, --audio FILE                   path to an image or audio file. use with multimodal models, can be
-                                        repeated if you have multiple files
---image-min-tokens N                    minimum number of tokens each image can take, only used by vision
-                                        models with dynamic resolution (default: read from model)
-                                        (env: LLAMA_ARG_IMAGE_MIN_TOKENS)
---image-max-tokens N                    maximum number of tokens each image can take, only used by vision
-                                        models with dynamic resolution (default: read from model)
-                                        (env: LLAMA_ARG_IMAGE_MAX_TOKENS)
+--no-display-prompt                     don't print prompt at generation (default: false)
+-co,   --color                          colorise output to distinguish prompt and user input from generations
+                                        (default: false)
+--no-context-shift                      disables context shift on infinite text generation (default: enabled)
+                                        (env: LLAMA_ARG_NO_CONTEXT_SHIFT)
+--context-shift                         enables context shift on infinite text generation (default: disabled)
+                                        (env: LLAMA_ARG_CONTEXT_SHIFT)
+-sys,  --system-prompt PROMPT           system prompt to use with model (if applicable, depending on chat
+                                        template)
+-sysf, --system-prompt-file FNAME       a file containing the system prompt (default: none)
+-ptc,  --print-token-count N            print token count every N tokens (default: -1)
+--prompt-cache FNAME                    file to cache prompt state for faster startup (default: none)
+--prompt-cache-all                      if specified, saves user input and generations to cache as well
+--prompt-cache-ro                       if specified, uses the prompt cache but does not update it
+-r,    --reverse-prompt PROMPT          halt generation at PROMPT, return control in interactive mode
+-sp,   --special                        special tokens output enabled (default: false)
+-cnv,  --conversation                   run in conversation mode:
+                                        - does not print special tokens and suffix/prefix
+                                        - interactive mode is also enabled
+                                        (default: auto enabled if chat template is available)
+-no-cnv, --no-conversation              force disable conversation mode (default: false)
+-st,   --single-turn                    run conversation for a single turn only, then exit when done
+                                        will not be interactive if first turn is predefined with --prompt
+                                        (default: false)
+-i,    --interactive                    run in interactive mode (default: false)
+-if,   --interactive-first              run in interactive mode and wait for input right away (default: false)
+-mli,  --multiline-input                allows you to write or paste multiple lines without ending each in '\'
+--in-prefix-bos                         prefix BOS to user inputs, preceding the `--in-prefix` string
+--in-prefix STRING                      string to prefix user inputs with (default: empty)
+--in-suffix STRING                      string to suffix after user inputs with (default: empty)
+--no-warmup                             skip warming up the model with an empty run
+-gan,  --grp-attn-n N                   group-attention factor (default: 1)
+                                        (env: LLAMA_ARG_GRP_ATTN_N)
+-gaw,  --grp-attn-w N                   group-attention width (default: 512)
+                                        (env: LLAMA_ARG_GRP_ATTN_W)
 --jinja                                 use jinja template for chat (default: disabled)
                                         (env: LLAMA_ARG_JINJA)
+--reasoning-format FORMAT               controls whether thought tags are allowed and/or extracted from the
+                                        response, and in which format they're returned; one of:
+                                        - none: leaves thoughts unparsed in `message.content`
+                                        - deepseek: puts thoughts in `message.reasoning_content`
+                                        - deepseek-legacy: keeps `<think>` tags in `message.content` while
+                                        also populating `message.reasoning_content`
+                                        (default: auto)
+                                        (env: LLAMA_ARG_THINK)
+--reasoning-budget N                    controls the amount of thinking allowed; currently only one of: -1 for
+                                        unrestricted thinking budget, or 0 to disable thinking (default: -1)
+                                        (env: LLAMA_ARG_THINK_BUDGET)
 --chat-template JINJA_TEMPLATE          set custom jinja chat template (default: template taken from model's
                                         metadata)
                                         if suffix/prefix are specified, template will be disabled
@@ -299,11 +329,28 @@
                                         openchat, orion, pangu-embedded, phi3, phi4, rwkv-world, seed_oss,
                                         smolvlm, vicuna, vicuna-orca, yandex, zephyr
                                         (env: LLAMA_ARG_CHAT_TEMPLATE)
-Experimental CLI for multimodal
+--chat-template-file JINJA_TEMPLATE_FILE
+                                        set custom jinja chat template file (default: template taken from
+                                        model's metadata)
+                                        if suffix/prefix are specified, template will be disabled
+                                        only commonly used templates are accepted (unless --jinja is set
+                                        before this flag):
+                                        list of built-in templates:
+                                        bailing, bailing-think, bailing2, chatglm3, chatglm4, chatml,
+                                        command-r, deepseek, deepseek2, deepseek3, exaone3, exaone4, falcon3,
+                                        gemma, gigachat, glmedge, gpt-oss, granite, grok-2, hunyuan-dense,
+                                        hunyuan-moe, kimi-k2, llama2, llama2-sys, llama2-sys-bos,
+                                        llama2-sys-strip, llama3, llama4, megrez, minicpm, mistral-v1,
+                                        mistral-v3, mistral-v3-tekken, mistral-v7, mistral-v7-tekken, monarch,
+                                        openchat, orion, pangu-embedded, phi3, phi4, rwkv-world, seed_oss,
+                                        smolvlm, vicuna, vicuna-orca, yandex, zephyr
+                                        (env: LLAMA_ARG_CHAT_TEMPLATE_FILE)
+--simple-io                             use basic IO for better compatibility in subprocesses and limited
+                                        consoles
 
-Usage: D:\Apps\llama-cuda\llama-mtmd-cli.exe [options] -m <model> --mmproj <mmproj> --image <image> --audio <audio> -p <prompt>
+example usage:
 
-  -m and --mmproj are required
-  -hf user/repo can replace both -m and --mmproj in most cases
-  --image, --audio and -p are optional, if NOT provided, the CLI will run in chat mode
-  to disable using GPU for mmproj model, add --no-mmproj-offload
+  text generation:     D:\Apps\llama-cuda\llama-cli.exe -m your_model.gguf -p "I believe the meaning of life is" -n 128 -no-cnv
+
+  chat (conversation): D:\Apps\llama-cuda\llama-cli.exe -m your_model.gguf -sys "You are a helpful assistant"
+

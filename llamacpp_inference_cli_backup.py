@@ -154,7 +154,6 @@ class ComfyLLama:
         jinja_chat_template="",
         system_prompt="",
     ):
-        print("WARNING: ComfyLLama (CLI) is deprecated. Please use ComfyLLama (llama-server) for better performance.")
         # Hardcoded settings
         no_display_prompt = True
         strip_prompt = True
