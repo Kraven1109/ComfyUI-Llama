@@ -2,11 +2,6 @@ import { app } from "../../../../scripts/app.js";
 
 console.log("ComfyLLama Preview Text extension loaded");
 
-function fitHeight(node) {
-    node.setSize([node.size[0], node.computeSize([node.size[0], node.size[1]])[1]]);
-    node?.graph?.setDirtyCanvas(true);
-}
-
 app.registerExtension({
     name: "Comfy.ComfyLLama.PreviewText",
     async beforeRegisterNodeDef(nodeType, nodeData, app) {
@@ -23,18 +18,20 @@ app.registerExtension({
                         const container = document.createElement("div");
                         container.className = "llama_text_preview";
                         container.style.cssText = `
-                            width: 100%;
-                            max-height: 300px;
-                            overflow-y: auto;
+                            width: calc(100% - 20px);
+                            max-height: 100%;
+                            overflow: hidden;
+                            display: flex;
+                            flex-direction: column;
                             padding: 8px;
+                            margin: 0 10px;
                             background: rgba(0, 0, 0, 0.3);
                             border-radius: 4px;
                             font-family: monospace;
                             font-size: 12px;
-                            white-space: pre-wrap;
-                            word-wrap: break-word;
                             color: #e0e0e0;
                             border: 1px solid rgba(255, 255, 255, 0.1);
+                            box-sizing: border-box;
                         `;
 
                         this.textWidget = this.addDOMWidget("text_preview", "preview", container, {
@@ -56,14 +53,27 @@ app.registerExtension({
                         font-size: 11px;
                         text-transform: uppercase;
                         letter-spacing: 0.5px;
+                        flex-shrink: 0;
                     `;
                     titleEl.textContent = title;
                     this.textWidget.container.appendChild(titleEl);
 
+                    // Add scrollable text content wrapper
+                    const textWrapper = document.createElement("div");
+                    textWrapper.style.cssText = `
+                        flex: 1;
+                        overflow-y: auto;
+                        overflow-x: hidden;
+                        min-height: 0;
+                        white-space: pre-wrap;
+                        word-wrap: break-word;
+                    `;
+                    
                     // Add text content
                     const textEl = document.createElement("div");
                     textEl.textContent = text;
-                    this.textWidget.container.appendChild(textEl);
+                    textWrapper.appendChild(textEl);
+                    this.textWidget.container.appendChild(textWrapper);
 
                     // Add copy button
                     const copyBtn = document.createElement("button");
@@ -77,6 +87,7 @@ app.registerExtension({
                         border: 1px solid rgba(255, 255, 255, 0.2);
                         border-radius: 3px;
                         color: #e0e0e0;
+                        flex-shrink: 0;
                     `;
                     copyBtn.onclick = () => {
                         navigator.clipboard.writeText(text).then(() => {
@@ -86,7 +97,8 @@ app.registerExtension({
                     };
                     this.textWidget.container.appendChild(copyBtn);
 
-                    fitHeight(this);
+                    // Request a redraw
+                    this.setDirtyCanvas(true, true);
                 }
             };
         }
