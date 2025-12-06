@@ -26,7 +26,7 @@ class GGUFLoader:
 
     RETURN_TYPES = ("MODEL",)
     FUNCTION = "load_gguf"
-    CATEGORY = "ComfyLLama"
+    CATEGORY = "🦙 ComfyUI-LLama"
 
     def load_gguf(self, gguf_name, gguf_path_override=""):
         # Use override path if provided, otherwise use selected file

@@ -160,7 +160,7 @@ class ComfyLLamaServer:
 
     RETURN_TYPES = ("STRING",)
     FUNCTION = "inference_llamacpp_server"
-    CATEGORY = "ComfyLLama"
+    CATEGORY = "🦙 ComfyUI-LLama"
 
     def run_inference(self, gguf_model, llama_cpp_folder, server_port, prompt, 
                      n_gpu_layers, ctx_size, temperature, max_tokens, repeat_penalty,
@@ -316,7 +316,8 @@ class ComfyLLamaServer:
 
     RETURN_TYPES = ("STRING",)
     FUNCTION = "inference_llamacpp_server"
-    CATEGORY = "ComfyLLama"
+    CATEGORY = "🦙 ComfyUI-LLama"
+    DESCRIPTION = "Server-based Llama inference using llama-server.exe. Faster than CLI for multimodal models. Supports text and image inputs via HTTP API."
 
     def inference_llamacpp_server(
         self,
@@ -382,7 +383,8 @@ class ComfyLLamaTextInput:
 
     RETURN_TYPES = ("STRING",)
     FUNCTION = "text_input"
-    CATEGORY = "ComfyLLama"
+    CATEGORY = "🦙 ComfyUI-LLama"
+    DESCRIPTION = "Simple text input node. Enter text that can be passed to other nodes."
 
     def text_input(self, text):
         return (text,)
@@ -406,21 +408,160 @@ class ComfyLLamaTextConcat:
 
     RETURN_TYPES = ("STRING",)
     FUNCTION = "text_concat"
-    CATEGORY = "ComfyLLama"
+    CATEGORY = "🦙 ComfyUI-LLama"
+    DESCRIPTION = "Concatenate multiple text inputs with a custom delimiter. Supports escape sequences: \\n (newline), \\t (tab), \\r\\n (Windows line endings), \\\\n (literal \\n), \\\" (double quote), \\' (single quote), --- (separator line)."
 
     def text_concat(self, delimiter, text1=None, text2=None, text3=None, text4=None, text5=None):
+        # Unescape delimiter to handle \n, \t, etc.
+        try:
+            delimiter = delimiter.encode().decode('unicode_escape')
+        except:
+            pass  # If unescaping fails, use as-is
         texts = [t for t in [text1, text2, text3, text4, text5] if t is not None]
         return (delimiter.join(texts),)
+
+
+class ComfyLLamaPreviewText:
+    """Preview text output in the ComfyUI interface with markdown support."""
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "text": ("STRING", {"forceInput": True}),
+            },
+            "optional": {
+                "title": ("STRING", {"default": "Output"}),
+            },
+        }
+
+    INPUT_IS_LIST = False
+    RETURN_TYPES = ("STRING",)
+    OUTPUT_NODE = True
+    FUNCTION = "preview_text"
+    CATEGORY = "🦙 ComfyUI-LLama"
+    DESCRIPTION = "Preview text output in the node. Supports markdown formatting. Pass-through: outputs the same text for chaining."
+
+    def preview_text(self, text, title="Output"):
+        # Return UI data for display and pass through the text
+        return {"ui": {"text": [text], "title": [title]}, "result": (text,)}
+
+
+class ComfyLLamaSaveText:
+    """Save text content to a file."""
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "text": ("STRING", {"forceInput": True}),
+                "filename": ("STRING", {"default": "output.txt"}),
+            },
+            "optional": {
+                "append": ("BOOLEAN", {"default": False}),
+                "add_timestamp": ("BOOLEAN", {"default": True}),
+            },
+        }
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("filepath",)
+    OUTPUT_NODE = True
+    FUNCTION = "save_text"
+    CATEGORY = "🦙 ComfyUI-LLama"
+    DESCRIPTION = "Save text to a file in the output directory. Option to append or overwrite, and add timestamp to filename."
+
+    def save_text(self, text, filename, append=False, add_timestamp=True):
+        import folder_paths
+        
+        output_dir = folder_paths.get_output_directory()
+        
+        # Add timestamp if requested
+        if add_timestamp:
+            import time
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            name, ext = os.path.splitext(filename)
+            if not ext:
+                ext = ".txt"
+            filename = f"{name}_{timestamp}{ext}"
+        
+        filepath = os.path.join(output_dir, filename)
+        
+        # Write or append
+        mode = "a" if append else "w"
+        with open(filepath, mode, encoding="utf-8") as f:
+            f.write(text)
+            if append:
+                f.write("\n")  # Add newline when appending
+        
+        print(f"[LLama] Text saved to: {filepath}")
+        return (filepath,)
+
+
+class ComfyLLamaPromptBuilder:
+    """Build prompts using templates with variable substitution."""
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "template": ("STRING", {
+                    "default": "Describe the following in detail:\n\n{input}\n\nBe specific and concise.",
+                    "multiline": True
+                }),
+            },
+            "optional": {
+                "input": ("STRING", {"forceInput": True}),
+                "var1_name": ("STRING", {"default": ""}),
+                "var1_value": ("STRING", {"forceInput": True}),
+                "var2_name": ("STRING", {"default": ""}),
+                "var2_value": ("STRING", {"forceInput": True}),
+                "var3_name": ("STRING", {"default": ""}),
+                "var3_value": ("STRING", {"forceInput": True}),
+            },
+        }
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("prompt",)
+    FUNCTION = "build_prompt"
+    CATEGORY = "🦙 ComfyUI-LLama"
+    DESCRIPTION = "Build prompts using templates. Use {input} for main input, or define custom variables like {var1_name} with var1_value. Supports multiple variable substitutions."
+
+    def build_prompt(self, template, input=None, 
+                     var1_name="", var1_value=None,
+                     var2_name="", var2_value=None,
+                     var3_name="", var3_value=None):
+        result = template
+        
+        # Replace {input} placeholder
+        if input is not None:
+            result = result.replace("{input}", input)
+        
+        # Replace custom variables
+        if var1_name and var1_value is not None:
+            result = result.replace(f"{{{var1_name}}}", var1_value)
+        if var2_name and var2_value is not None:
+            result = result.replace(f"{{{var2_name}}}", var2_value)
+        if var3_name and var3_value is not None:
+            result = result.replace(f"{{{var3_name}}}", var3_value)
+        
+        return (result,)
 
 
 NODE_CLASS_MAPPINGS = {
     "ComfyLLamaServer": ComfyLLamaServer,
     "ComfyLLamaTextInput": ComfyLLamaTextInput,
     "ComfyLLamaTextConcat": ComfyLLamaTextConcat,
+    "ComfyLLamaPreviewText": ComfyLLamaPreviewText,
+    "ComfyLLamaSaveText": ComfyLLamaSaveText,
+    "ComfyLLamaPromptBuilder": ComfyLLamaPromptBuilder,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "ComfyLLamaServer": "ComfyLLama (llama-server)",
-    "ComfyLLamaTextInput": "Text Input",
-    "ComfyLLamaTextConcat": "Text Concat",
+    "ComfyLLamaServer": "🦙 LLama Server",
+    "ComfyLLamaTextInput": "📝 Text Input",
+    "ComfyLLamaTextConcat": "🔗 Text Concat",
+    "ComfyLLamaPreviewText": "👁️ Preview Text",
+    "ComfyLLamaSaveText": "💾 Save Text",
+    "ComfyLLamaPromptBuilder": "🛠️ Prompt Builder",
 }
+

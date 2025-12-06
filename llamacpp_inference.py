@@ -129,7 +129,8 @@ class ComfyLLama:
 
     RETURN_TYPES = ("STRING",)
     FUNCTION = "inference_llamacpp"
-    CATEGORY = "ComfyLLama"
+    CATEGORY = "🦙 ComfyUI-LLama"
+    DESCRIPTION = "DEPRECATED: Use ComfyLLama (llama-server) instead. CLI-based Llama inference using llama-cli.exe. Slower than server mode."
 
     def inference_llamacpp(
         self,

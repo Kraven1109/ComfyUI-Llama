@@ -13,7 +13,7 @@ class MediaPathsLoader:
     RETURN_TYPES = ("PATH",)
     RETURN_NAMES = ("paths",)
     FUNCTION = "combine"
-    CATEGORY = "utils"
+    CATEGORY = "🦙 ComfyUI-LLama"
 
     def combine(self, **kwargs):
         paths = []
