@@ -14,6 +14,7 @@ class MediaPathsLoader:
     RETURN_NAMES = ("paths",)
     FUNCTION = "combine"
     CATEGORY = "🦙 ComfyUI-LLama"
+    DESCRIPTION = "Combine multiple file paths for multimodal inputs. Connect path inputs dynamically. Outputs a list of paths for image/audio processing."
 
     def combine(self, **kwargs):
         paths = []

@@ -27,6 +27,7 @@ class GGUFLoader:
     RETURN_TYPES = ("MODEL",)
     FUNCTION = "load_gguf"
     CATEGORY = "🦙 ComfyUI-LLama"
+    DESCRIPTION = "Load GGUF model files from models directory. Supports all GGUF models for llama.cpp. Use gguf_path_override for custom paths."
 
     def load_gguf(self, gguf_name, gguf_path_override=""):
         # Use override path if provided, otherwise use selected file

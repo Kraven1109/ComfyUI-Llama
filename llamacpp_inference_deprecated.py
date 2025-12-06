@@ -114,7 +114,7 @@ class ComfyLLama:
                 # Model and prompt options (unchanged)
                 "mmproj_model": ("MODEL",),
                 "stop_string": ("STRING", {"default": ""}),
-                "n_predict": ("INT", {"default": -1, "min": -2, "max": 8192, "step": 16}),
+                "n_predict": ("INT", {"default": -1, "min": -2, "max": 32768, "step": 1, "tooltip": "-1 = infinite (until EOS), -2 = fill context, 0+ = exact token limit"}),
                 "use_jinja": ("BOOLEAN", {"default": False}),
                 "jinja_chat_template": ("STRING", {"default": ""}),
                 "system_prompt": ("STRING", {"default": ""}),
@@ -129,7 +129,8 @@ class ComfyLLama:
 
     RETURN_TYPES = ("STRING",)
     FUNCTION = "inference_llamacpp"
-    CATEGORY = "ComfyLLama"
+    CATEGORY = "🦙 ComfyUI-LLama"
+    DESCRIPTION = "DEPRECATED: Use ComfyLLama (llama-server) instead. CLI-based Llama inference using llama-cli.exe. Slower than server mode."
 
     def inference_llamacpp(
         self,
@@ -154,6 +155,7 @@ class ComfyLLama:
         jinja_chat_template="",
         system_prompt="",
     ):
+        print("WARNING: ComfyLLama (CLI) is deprecated. Please use ComfyLLama (llama-server) for better performance.")
         # Hardcoded settings
         no_display_prompt = True
         strip_prompt = True

@@ -1,7 +1,7 @@
 # ComfyUI_LLama - llama.cpp integration for ComfyUI
 # Provides LLM inference nodes using llama-server
 
-from .llamacpp_inference import ComfyLLama
+from .llamacpp_inference_deprecated import ComfyLLama  # Deprecated CLI node
 from .gguf_loader import GGUFLoader
 from .media_paths_loader import MediaPathsLoader
 from .llamacpp_inference_server import (

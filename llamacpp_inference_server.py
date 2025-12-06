@@ -1,21 +1,14 @@
 import os
-import tempfile
-import torch
-import shlex
-import shutil
-from pathlib import Path
-import folder_paths
-from torchvision.transforms import ToPILImage
-import numpy as np
-from scipy.io.wavfile import write as wav_write
-import requests
-import json
-import time
 import subprocess
-import threading
+import time
 import socket
 import io
 import base64
+
+import torch
+import numpy as np
+import requests
+import folder_paths
 from PIL import Image
 
 
@@ -66,101 +59,6 @@ class ComfyLLamaServer:
                     return # Port is free
             time.sleep(0.5)
         print(f"Warning: Port {port} seems busy, attempting to start anyway...")
-
-    def _prepare_inputs(self, gguf_model, mmproj_model, media_paths, image, audio):
-        """Shared input preparation logic for inference and command building."""
-        # Handle gguf_model input
-        gguf_path = self._resolve_path(gguf_model)
-        if not gguf_path or not os.path.exists(gguf_path):
-            raise ValueError(f"GGUF file not found: {gguf_path}")
-
-        # Handle mmproj_model input
-        mmproj_path = self._resolve_path(mmproj_model)
-        if mmproj_model and not mmproj_path:
-            raise ValueError(f"Invalid mmproj_model format: {type(mmproj_model)}")
-        if mmproj_path and not os.path.exists(mmproj_path):
-            raise ValueError(f"MMProj file not found: {mmproj_path}")
-
-        # Enforce exclusive use: cannot use media_paths with any single media
-        if media_paths is not None and any([image, audio]):
-            raise ValueError("Cannot provide both single media inputs and media_paths. Choose single or multiple.")
-
-        # Normalize and detect multimodal usage (image/audio or mmproj)
-        IMAGE_EXT = {'.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tiff', '.gif'}
-        AUDIO_EXT = {'.wav', '.mp3', '.ogg', '.flac', '.m4a'}
-
-        # Build candidate paths list from provided inputs
-        candidate_paths = []
-        if media_paths is not None:
-            if isinstance(media_paths, list):
-                candidate_paths.extend(media_paths)
-            else:
-                candidate_paths.append(media_paths)
-
-        # Classify by extension
-        images = []
-        audios = []
-        others = []
-        for p in candidate_paths:
-            if isinstance(p, str) and p:
-                ext = os.path.splitext(p.lower())[1]
-                if ext in IMAGE_EXT:
-                    images.append(p)
-                elif ext in AUDIO_EXT:
-                    audios.append(p)
-                else:
-                    others.append(p)
-            else:
-                others.append(str(p))  # invalid
-
-        # Handle tensor inputs
-        if image is not None:
-            images.append('__temp_image__')
-        if audio is not None:
-            audios.append('__temp_audio__')
-
-        # Robust multimodal detection: require mmproj for images/audio
-        has_multimodal_input = bool(images) or bool(audios)
-        if has_multimodal_input and not mmproj_path:
-            raise ValueError("Multimodal input (images/audio) detected but no mmproj model provided. Multimodal models require an mmproj file for vision/audio processing.")
-        
-        use_multimodal = has_multimodal_input
-
-        return gguf_path, mmproj_path, images, audios, use_multimodal
-
-    @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "prefix": ("STRING", {"default": "", "multiline": True}),
-                "gguf_model": ("MODEL",),
-                "temperature": ("FLOAT", {"default": 0.7, "min": 0, "max": 2.0, "step": 0.1}),
-                "seed": ("INT", {"default": -1}),
-                "n_gpu_layers": ("INT", {"default": -1, "min": -1, "max": 1000, "step": 1}),
-                "ctx_size": ("INT", {"default": 32768, "min": 128, "max": 32768, "step": 128}),
-                "server_port": ("INT", {"default": 8080, "min": 1024, "max": 65535, "step": 1}),
-                "repeat_penalty": ("FLOAT", {"default": 1.1, "min": 1.0, "max": 3.0, "step": 0.1}),
-                "llama_cpp_folder": ("STRING", {"default": r"d:\Apps\llama-cuda"}),
-            },
-            "optional": {
-                # Separate inputs for different media types
-                "image": ("IMAGE",),
-                "audio": ("AUDIO",),
-                "media_paths": ("PATH",),
-                # Model and prompt options (unchanged)
-                "mmproj_model": ("MODEL",),
-                "stop_string": ("STRING", {"default": ""}),
-                "n_predict": ("INT", {"default": -1, "min": -2, "max": 8192, "step": 16}),
-                "use_jinja": ("BOOLEAN", {"default": False}),
-                "jinja_chat_template": ("STRING", {"default": ""}),
-                "system_prompt": ("STRING", {"default": ""}),
-                "text_input": ("STRING", {"forceInput": True}),
-            },
-        }
-
-    RETURN_TYPES = ("STRING",)
-    FUNCTION = "inference_llamacpp_server"
-    CATEGORY = "🦙 ComfyUI-LLama"
 
     def run_inference(self, gguf_model, llama_cpp_folder, server_port, prompt, 
                      n_gpu_layers, ctx_size, temperature, max_tokens, repeat_penalty,
@@ -306,7 +204,7 @@ class ComfyLLamaServer:
                 # Model and prompt options (unchanged)
                 "mmproj_model": ("MODEL",),
                 "stop_string": ("STRING", {"default": ""}),
-                "n_predict": ("INT", {"default": -1, "min": -2, "max": 8192, "step": 16}),
+                "n_predict": ("INT", {"default": -1, "min": -2, "max": 8192, "step": 1, "tooltip": "-1 = infinite (until EOS), -2 = fill context, 0+ = exact token limit"}),
                 "use_jinja": ("BOOLEAN", {"default": False}),
                 "jinja_chat_template": ("STRING", {"default": ""}),
                 "system_prompt": ("STRING", {"default": ""}),
