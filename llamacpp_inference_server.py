@@ -621,29 +621,53 @@ class ComfyLLamaTextConcat:
 
 
 class ComfyLLamaPreviewText:
-    """Preview text output in the ComfyUI interface with markdown support."""
+    """Preview text output in the ComfyUI interface with markdown support.
+    
+    Can work in two modes:
+    1. With input connection: displays and passes through the connected text
+    2. Without input: uses the cached_text field (can be edited manually)
+    """
     
     @classmethod
     def INPUT_TYPES(s):
         return {
-            "required": {
-                "text": ("STRING", {"forceInput": True}),
-            },
+            "required": {},
             "optional": {
+                "text": ("STRING", {
+                    "forceInput": True,
+                    "tooltip": "Text input from another node. When connected, this takes priority."
+                }),
+                "cached_text": ("STRING", {
+                    "default": "", 
+                    "multiline": True,
+                    "tooltip": "Fallback text when no input is connected. You can paste/edit text here manually."
+                }),
                 "title": ("STRING", {"default": "Output"}),
             },
         }
 
     INPUT_IS_LIST = False
     RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("text",)
     OUTPUT_NODE = True
     FUNCTION = "preview_text"
     CATEGORY = "🦙 ComfyUI-LLama"
-    DESCRIPTION = "Preview text output in the node. Supports markdown formatting. Pass-through: outputs the same text for chaining."
+    DESCRIPTION = """Preview and pass-through text with optional caching.
 
-    def preview_text(self, text, title="Output"):
+🔗 **Two modes:**
+• With input: Displays connected text and passes it through
+• Without input: Uses cached_text field (editable)
+
+💡 **Tips:**
+• Copy output text to cached_text to keep it available after disconnecting
+• Use as a text buffer/clipboard between workflow runs"""
+
+    def preview_text(self, text=None, cached_text="", title="Output"):
+        # Use connected text if available, otherwise use cached
+        output_text = text if text is not None else cached_text
+        
         # Return UI data for display and pass through the text
-        return {"ui": {"text": [text], "title": [title]}, "result": (text,)}
+        return {"ui": {"text": [output_text], "title": [title]}, "result": (output_text,)}
 
 
 class ComfyLLamaSaveText:
