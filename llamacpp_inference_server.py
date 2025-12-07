@@ -178,7 +178,7 @@ class ComfyLLamaServerConfig:
                 }),
                 "custom_chat_template": ("STRING", {
                     "default": "",
-                    "multiline": True,
+                    "multiline": False,
                     "tooltip": "Custom Jinja2 chat template. Overrides chat_template if provided. Leave empty to use preset."
                 }),
             },
