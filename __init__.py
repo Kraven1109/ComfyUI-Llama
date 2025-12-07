@@ -5,6 +5,7 @@ from .llamacpp_inference_deprecated import ComfyLLama  # Deprecated CLI node
 from .gguf_loader import GGUFLoader
 from .media_paths_loader import MediaPathsLoader
 from .llamacpp_inference_server import (
+    ComfyLLamaServerConfig,
     ComfyLLamaServer, 
     ComfyLLamaTextInput, 
     ComfyLLamaTextConcat,
@@ -17,6 +18,7 @@ NODE_CLASS_MAPPINGS = {
     "ComfyLLama": ComfyLLama,
     "GGUFLoader": GGUFLoader,
     "MediaPathsLoader": MediaPathsLoader,
+    "ComfyLLamaServerConfig": ComfyLLamaServerConfig,
     "ComfyLLamaServer": ComfyLLamaServer,
     "ComfyLLamaTextInput": ComfyLLamaTextInput,
     "ComfyLLamaTextConcat": ComfyLLamaTextConcat,
@@ -29,6 +31,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ComfyLLama": "🦙 ComfyUI-LLama CLI [Deprecated]",
     "GGUFLoader": "📦 ComfyUI-LLama GGUF Loader",
     "MediaPathsLoader": "🖼️ ComfyUI-LLama Media Paths",
+    "ComfyLLamaServerConfig": "⚙️ ComfyUI-LLama Server Config",
     "ComfyLLamaServer": "🦙 ComfyUI-LLama Server",
     "ComfyLLamaTextInput": "📝 ComfyUI-LLama Text Input",
     "ComfyLLamaTextConcat": "🔗 ComfyUI-LLama Text Concat",
