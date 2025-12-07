@@ -165,6 +165,22 @@ class ComfyLLamaServerConfig:
                     "step": 0.01,
                     "tooltip": "Mirostat learning rate. How fast it adapts."
                 }),
+                # === Chat Template ===
+                "use_jinja": ("BOOLEAN", {
+                    "default": True,
+                    "tooltip": "Enable Jinja2 chat template processing. Recommended for chat models."
+                }),
+                "chat_template": (["auto", "chatml", "llama2", "llama3", "gemma", "phi3", "phi4", 
+                                   "mistral-v1", "mistral-v3", "deepseek", "deepseek2", "deepseek3",
+                                   "command-r", "vicuna", "zephyr", "openchat", "falcon3", "exaone3"], {
+                    "default": "auto",
+                    "tooltip": "Chat template format. 'auto' = detect from model metadata. Use specific template if auto-detection fails."
+                }),
+                "custom_chat_template": ("STRING", {
+                    "default": "",
+                    "multiline": True,
+                    "tooltip": "Custom Jinja2 chat template. Overrides chat_template if provided. Leave empty to use preset."
+                }),
             },
         }
     
@@ -213,6 +229,9 @@ class ComfyLLamaServerConfig:
         mirostat=0,
         mirostat_tau=5.0,
         mirostat_eta=0.1,
+        use_jinja=True,
+        chat_template="auto",
+        custom_chat_template="",
     ):
         config = {
             # Server
@@ -242,6 +261,10 @@ class ComfyLLamaServerConfig:
             "mirostat": mirostat,
             "mirostat_tau": mirostat_tau,
             "mirostat_eta": mirostat_eta,
+            # Chat Template
+            "use_jinja": use_jinja,
+            "chat_template": chat_template,
+            "custom_chat_template": custom_chat_template,
         }
         return (config,)
 
@@ -374,6 +397,20 @@ class ComfyLLamaServer:
             typical_p = config.get("typical_p", 1.0)
             if typical_p < 1.0:
                 cmd.extend(["--typical", str(typical_p)])
+            
+            # Add chat template settings
+            use_jinja = config.get("use_jinja", True)
+            if use_jinja:
+                cmd.append("--jinja")
+            
+            chat_template = config.get("chat_template", "auto")
+            custom_chat_template = config.get("custom_chat_template", "")
+            
+            # Use custom template if provided, otherwise use preset (if not auto)
+            if custom_chat_template:
+                cmd.extend(["--chat-template", custom_chat_template])
+            elif chat_template != "auto":
+                cmd.extend(["--chat-template", chat_template])
             
             # Only load mmproj if image is provided
             if mmproj_path and image is not None:
@@ -639,7 +676,7 @@ class ComfyLLamaPreviewText:
                 }),
                 "cached_text": ("STRING", {
                     "default": "", 
-                    "multiline": True,
+                    "multiline": False,
                     "tooltip": "Fallback text when no input is connected. You can paste/edit text here manually."
                 }),
                 "title": ("STRING", {"default": "Output"}),
