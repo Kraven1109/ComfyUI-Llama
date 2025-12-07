@@ -12,6 +12,240 @@ import folder_paths
 from PIL import Image
 
 
+class ComfyLLamaServerConfig:
+    """Configuration node for llama-server sampling parameters.
+    
+    Separates server/sampling configuration from the main inference node
+    for better organization and reusability.
+    """
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                # === Server Settings ===
+                "llama_cpp_folder": ("STRING", {
+                    "default": r"d:\Apps\llama-cuda",
+                    "tooltip": "Path to llama.cpp folder containing llama-server.exe"
+                }),
+                "server_port": ("INT", {
+                    "default": 8080, 
+                    "min": 1024, 
+                    "tooltip": "Port for the HTTP server. Use different ports if running multiple instances."
+                }),
+                "n_gpu_layers": ("INT", {
+                    "default": -1, 
+                    "min": -1,
+                    "tooltip": "-1 = offload all layers to GPU, 0 = CPU only, N = offload N layers"
+                }),
+                "ctx_size": ("INT", {
+                    "default": 32768, 
+                    "min": 128,
+                    "tooltip": "Context size in tokens. Higher = more memory. No max limit - depends on your GPU VRAM."
+                }),
+                "n_predict": ("INT", {
+                    "default": -1, 
+                    "min": -2,
+                    "tooltip": "-1 = infinite (until EOS), -2 = fill context, 0+ = exact token limit. No max limit."
+                }),
+                
+                # === Basic Sampling ===
+                "temperature": ("FLOAT", {
+                    "default": 0.6, 
+                    "min": 0.0, 
+                    "max": 2.0, 
+                    "step": 0.05,
+                    "tooltip": "Randomness. 0 = deterministic, 0.3-0.7 = balanced, 1.0+ = creative/chaotic"
+                }),
+                "top_k": ("INT", {
+                    "default": 40, 
+                    "min": 0,
+                    "tooltip": "Keep only top K tokens. 0 = disabled. Lower = more focused, higher = more diverse"
+                }),
+                "top_p": ("FLOAT", {
+                    "default": 0.9, 
+                    "min": 0.0, 
+                    "max": 1.0, 
+                    "step": 0.05,
+                    "tooltip": "Nucleus sampling. Keep tokens with cumulative prob <= top_p. 1.0 = disabled"
+                }),
+                "min_p": ("FLOAT", {
+                    "default": 0.05, 
+                    "min": 0.0, 
+                    "max": 1.0, 
+                    "step": 0.01,
+                    "tooltip": "Minimum probability threshold. Tokens below min_p * max_prob are filtered. 0.0 = disabled"
+                }),
+                
+                # === Anti-Repetition ===
+                "repeat_penalty": ("FLOAT", {
+                    "default": 1.3, 
+                    "min": 1.0, 
+                    "max": 3.0, 
+                    "step": 0.05,
+                    "tooltip": "Penalize repeated tokens. 1.0 = disabled, 1.1-1.3 = mild, 1.5+ = strong"
+                }),
+                "repeat_last_n": ("INT", {
+                    "default": 256, 
+                    "min": 0,
+                    "tooltip": "How many recent tokens to check for repetition. 0 = disabled, -1 = ctx_size"
+                }),
+                "frequency_penalty": ("FLOAT", {
+                    "default": 0.1, 
+                    "min": 0.0, 
+                    "max": 2.0, 
+                    "step": 0.05,
+                    "tooltip": "Penalize tokens based on frequency in text. 0.0 = disabled. Reduces common word spam."
+                }),
+                "presence_penalty": ("FLOAT", {
+                    "default": 0.1, 
+                    "min": 0.0, 
+                    "max": 2.0, 
+                    "step": 0.05,
+                    "tooltip": "Penalize tokens that appeared at all. 0.0 = disabled. Encourages topic diversity."
+                }),
+                
+                # === DRY Sampling (Don't Repeat Yourself) ===
+                "dry_multiplier": ("FLOAT", {
+                    "default": 0.8, 
+                    "min": 0.0, 
+                    "max": 2.0, 
+                    "step": 0.1,
+                    "tooltip": "DRY sampling strength. 0.0 = disabled. 0.5-1.0 = recommended. Prevents phrase repetition."
+                }),
+                "dry_base": ("FLOAT", {
+                    "default": 1.75, 
+                    "min": 1.0, 
+                    "max": 3.0, 
+                    "step": 0.05,
+                    "tooltip": "DRY exponential base. Higher = stronger penalty for longer repeated sequences."
+                }),
+                "dry_allowed_length": ("INT", {
+                    "default": 2, 
+                    "min": 1, 
+                    "max": 10,
+                    "tooltip": "Allow repetition of sequences up to this length. 2 = allow bigrams, 3 = allow trigrams"
+                }),
+                "dry_penalty_last_n": ("INT", {
+                    "default": -1, 
+                    "min": -1,
+                    "tooltip": "Tokens to check for DRY. -1 = ctx_size, 0 = disabled"
+                }),
+            },
+            "optional": {
+                # === Advanced ===
+                "seed": ("INT", {
+                    "default": -1,
+                    "tooltip": "-1 = random seed each run. Set specific value for reproducible outputs."
+                }),
+                "typical_p": ("FLOAT", {
+                    "default": 1.0, 
+                    "min": 0.0, 
+                    "max": 1.0, 
+                    "step": 0.05,
+                    "tooltip": "Locally typical sampling. 1.0 = disabled. Lower values = more coherent but less creative."
+                }),
+                "mirostat": ("INT", {
+                    "default": 0, 
+                    "min": 0, 
+                    "max": 2,
+                    "tooltip": "Mirostat algorithm. 0 = disabled, 1 = Mirostat, 2 = Mirostat 2.0. Auto-adjusts sampling."
+                }),
+                "mirostat_tau": ("FLOAT", {
+                    "default": 5.0, 
+                    "min": 0.0, 
+                    "max": 10.0, 
+                    "step": 0.1,
+                    "tooltip": "Mirostat target entropy. Lower = more focused, higher = more diverse."
+                }),
+                "mirostat_eta": ("FLOAT", {
+                    "default": 0.1, 
+                    "min": 0.0, 
+                    "max": 1.0, 
+                    "step": 0.01,
+                    "tooltip": "Mirostat learning rate. How fast it adapts."
+                }),
+            },
+        }
+    
+    RETURN_TYPES = ("SERVER_CONFIG",)
+    RETURN_NAMES = ("config",)
+    FUNCTION = "create_config"
+    CATEGORY = "🦙 ComfyUI-LLama"
+    DESCRIPTION = """Server configuration for llama-server.exe.
+
+📌 **Quick Presets:**
+• Creative Writing: temp=0.8, repeat_penalty=1.2, dry=0.5
+• Factual/Code: temp=0.3, repeat_penalty=1.1, dry=0.0
+• Anti-Repetition: repeat_penalty=1.3, dry=0.8, freq=0.1, pres=0.1
+
+⚠️ **Troubleshooting:**
+• Output repeating? → Increase dry_multiplier, repeat_penalty
+• Output too random? → Lower temperature, increase top_k
+• Output cut off? → Increase n_predict or set to -1
+• Out of VRAM? → Lower ctx_size or n_gpu_layers
+
+💡 **Tips:**
+• ctx_size and n_predict have no max limit - depends on your GPU
+• Use external INT nodes to pipe custom values if needed"""
+
+    def create_config(
+        self,
+        llama_cpp_folder,
+        server_port,
+        n_gpu_layers,
+        ctx_size,
+        n_predict,
+        temperature,
+        top_k,
+        top_p,
+        min_p,
+        repeat_penalty,
+        repeat_last_n,
+        frequency_penalty,
+        presence_penalty,
+        dry_multiplier,
+        dry_base,
+        dry_allowed_length,
+        dry_penalty_last_n,
+        seed=-1,
+        typical_p=1.0,
+        mirostat=0,
+        mirostat_tau=5.0,
+        mirostat_eta=0.1,
+    ):
+        config = {
+            # Server
+            "llama_cpp_folder": llama_cpp_folder,
+            "server_port": server_port,
+            "n_gpu_layers": n_gpu_layers,
+            "ctx_size": ctx_size,
+            "n_predict": n_predict,
+            # Basic
+            "temperature": temperature,
+            "top_k": top_k,
+            "top_p": top_p,
+            "min_p": min_p,
+            # Anti-repetition
+            "repeat_penalty": repeat_penalty,
+            "repeat_last_n": repeat_last_n,
+            "frequency_penalty": frequency_penalty,
+            "presence_penalty": presence_penalty,
+            # DRY
+            "dry_multiplier": dry_multiplier,
+            "dry_base": dry_base,
+            "dry_allowed_length": dry_allowed_length,
+            "dry_penalty_last_n": dry_penalty_last_n,
+            # Advanced
+            "seed": seed,
+            "typical_p": typical_p,
+            "mirostat": mirostat,
+            "mirostat_tau": mirostat_tau,
+            "mirostat_eta": mirostat_eta,
+        }
+        return (config,)
+
+
 class ComfyLLamaServer:
     """ComfyLLama node using llama-server.exe for GGUF inference via HTTP API.
     
@@ -60,11 +294,28 @@ class ComfyLLamaServer:
             time.sleep(0.5)
         print(f"Warning: Port {port} seems busy, attempting to start anyway...")
 
-    def run_inference(self, gguf_model, llama_cpp_folder, server_port, prompt, 
-                     n_gpu_layers, ctx_size, temperature, max_tokens, repeat_penalty,
-                     image=None, mmproj_model=None, system_prompt="", stop_string="", seed=-1):
-
+    def run_inference(self, gguf_model, config, prompt, 
+                     image=None, mmproj_model=None, system_prompt="", stop_string=""):
+        """
+        Run inference with full sampling parameters from config.
+        
+        Args:
+            gguf_model: Path to GGUF model file
+            config: Dictionary containing all server and sampling parameters
+            prompt: The user prompt text
+            image: Optional image tensor for multimodal
+            mmproj_model: Optional mmproj model path for vision
+            system_prompt: Optional system prompt
+            stop_string: Optional stop sequence
+        """
         server_process = None
+        
+        # Extract config values
+        llama_cpp_folder = config.get("llama_cpp_folder", r"d:\Apps\llama-cuda")
+        server_port = config.get("server_port", 8080)
+        n_gpu_layers = config.get("n_gpu_layers", -1)
+        ctx_size = config.get("ctx_size", 32768)
+        n_predict = config.get("n_predict", -1)
         
         try:
             # 1. Setup Paths
@@ -85,7 +336,7 @@ class ComfyLLamaServer:
                     return ("Error: Image input detected but no mmproj_model provided.",)
                 image_data = self._tensor_to_base64(image)
 
-            # 3. Build Command
+            # 3. Build Command with sampling params
             cmd = [
                 server_exe,
                 "-m", gguf_path,
@@ -94,7 +345,35 @@ class ComfyLLamaServer:
                 "--n-gpu-layers", str(n_gpu_layers),
                 "--threads", "-1",
                 "--flash-attn", "auto",
+                # Sampling params on server startup
+                "--temp", str(config.get("temperature", 0.6)),
+                "--top-k", str(config.get("top_k", 40)),
+                "--top-p", str(config.get("top_p", 0.9)),
+                "--min-p", str(config.get("min_p", 0.05)),
+                "--repeat-penalty", str(config.get("repeat_penalty", 1.3)),
+                "--repeat-last-n", str(config.get("repeat_last_n", 256)),
+                "--frequency-penalty", str(config.get("frequency_penalty", 0.1)),
+                "--presence-penalty", str(config.get("presence_penalty", 0.1)),
+                # DRY sampling
+                "--dry-multiplier", str(config.get("dry_multiplier", 0.8)),
+                "--dry-base", str(config.get("dry_base", 1.75)),
+                "--dry-allowed-length", str(config.get("dry_allowed_length", 2)),
+                "--dry-penalty-last-n", str(config.get("dry_penalty_last_n", -1)),
             ]
+            
+            # Add mirostat if enabled
+            mirostat = config.get("mirostat", 0)
+            if mirostat > 0:
+                cmd.extend([
+                    "--mirostat", str(mirostat),
+                    "--mirostat-ent", str(config.get("mirostat_tau", 5.0)),
+                    "--mirostat-lr", str(config.get("mirostat_eta", 0.1)),
+                ])
+            
+            # Add typical_p if not disabled
+            typical_p = config.get("typical_p", 1.0)
+            if typical_p < 1.0:
+                cmd.extend(["--typical", str(typical_p)])
             
             # Only load mmproj if image is provided
             if mmproj_path and image is not None:
@@ -105,13 +384,10 @@ class ComfyLLamaServer:
             
             print(f"ComfyLLama: Starting One-Shot Server on port {server_port}...")
             print(f"ComfyLLama: Command: {' '.join(cmd)}")
-            # Use separate process group on windows to ensure clean kill, or just Popen
             server_process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, text=True, cwd=os.path.dirname(server_exe))
 
             # 5. Wait for Health Check (Model Loading)
-            # Give it time to load the model into VRAM
-            # Multimodal models take longer due to vision component
-            load_timeout = 300 if mmproj_path else 120  # 5 min for multimodal, 2 min for text-only
+            load_timeout = 300 if mmproj_path else 120
             start_time = time.time()
             server_ready = False
             print(f"ComfyLLama: Waiting up to {load_timeout} seconds for model to load...")
@@ -126,7 +402,7 @@ class ComfyLLamaServer:
                         print("ComfyLLama: Model loaded successfully!")
                         break
                 except:
-                    time.sleep(1)  # Check every 1 seconds for multimodal
+                    time.sleep(1)
             
             if not server_ready:
                 return ("Error: Server timed out while loading model. Multimodal models may take longer to load.",)
@@ -144,16 +420,41 @@ class ComfyLLamaServer:
             
             messages.append({"role": "user", "content": user_content})
             
+            # Build payload with all sampling params
             payload = {
                 "messages": messages,
-                "temperature": temperature,
-                "n_predict": max_tokens,
-                "repeat_penalty": repeat_penalty,
+                "n_predict": n_predict,
                 "stop": [stop_string] if stop_string else [],
+                # Sampling params (override server defaults if needed)
+                "temperature": config.get("temperature", 0.6),
+                "top_k": config.get("top_k", 40),
+                "top_p": config.get("top_p", 0.9),
+                "min_p": config.get("min_p", 0.05),
+                "repeat_penalty": config.get("repeat_penalty", 1.3),
+                "repeat_last_n": config.get("repeat_last_n", 256),
+                "frequency_penalty": config.get("frequency_penalty", 0.1),
+                "presence_penalty": config.get("presence_penalty", 0.1),
+                # DRY
+                "dry_multiplier": config.get("dry_multiplier", 0.8),
+                "dry_base": config.get("dry_base", 1.75),
+                "dry_allowed_length": config.get("dry_allowed_length", 2),
+                "dry_penalty_last_n": config.get("dry_penalty_last_n", -1),
             }
             
+            # Add seed if specified
+            seed = config.get("seed", -1)
             if seed != -1:
                 payload["seed"] = seed
+            
+            # Add mirostat to payload if enabled
+            if mirostat > 0:
+                payload["mirostat"] = mirostat
+                payload["mirostat_tau"] = config.get("mirostat_tau", 5.0)
+                payload["mirostat_eta"] = config.get("mirostat_eta", 0.1)
+            
+            # Add typical_p if not disabled
+            if typical_p < 1.0:
+                payload["typical_p"] = typical_p
 
             print("ComfyLLama: Sending prompt...")
             response = requests.post(f"http://localhost:{server_port}/chat/completions", json=payload, timeout=600)
@@ -186,87 +487,87 @@ class ComfyLLamaServer:
     def INPUT_TYPES(s):
         return {
             "required": {
-                "prefix": ("STRING", {"default": "", "multiline": True}),
-                "gguf_model": ("MODEL",),
-                "temperature": ("FLOAT", {"default": 0.7, "min": 0, "max": 2.0, "step": 0.1}),
-                "seed": ("INT", {"default": -1}),
-                "n_gpu_layers": ("INT", {"default": -1, "min": -1, "max": 1000, "step": 1}),
-                "ctx_size": ("INT", {"default": 32768, "min": 128, "max": 32768, "step": 128}),
-                "server_port": ("INT", {"default": 8080, "min": 1024, "max": 65535, "step": 1}),
-                "repeat_penalty": ("FLOAT", {"default": 1.1, "min": 1.0, "max": 3.0, "step": 0.1}),
-                "llama_cpp_folder": ("STRING", {"default": r"d:\Apps\llama-cuda"}),
+                "gguf_model": ("MODEL", {
+                    "tooltip": "GGUF model file from the Model Loader node"
+                }),
+                "config": ("SERVER_CONFIG", {
+                    "tooltip": "Server configuration from the ServerConfig node"
+                }),
+                "prompt": ("STRING", {
+                    "default": "", 
+                    "multiline": True,
+                    "tooltip": "Main prompt text. Can be combined with text_input."
+                }),
             },
             "optional": {
-                # Separate inputs for different media types
-                "image": ("IMAGE",),
-                "audio": ("AUDIO",),
-                "media_paths": ("PATH",),
-                # Model and prompt options (unchanged)
-                "mmproj_model": ("MODEL",),
-                "stop_string": ("STRING", {"default": ""}),
-                "n_predict": ("INT", {"default": -1, "min": -2, "max": 8192, "step": 1, "tooltip": "-1 = infinite (until EOS), -2 = fill context, 0+ = exact token limit"}),
-                "use_jinja": ("BOOLEAN", {"default": False}),
-                "jinja_chat_template": ("STRING", {"default": ""}),
-                "system_prompt": ("STRING", {"default": ""}),
-                "text_input": ("STRING", {"forceInput": True}),
+                "text_input": ("STRING", {
+                    "forceInput": True,
+                    "tooltip": "Additional text input from other nodes. Will be appended to prompt."
+                }),
+                "image": ("IMAGE", {
+                    "tooltip": "Image input for multimodal models. Requires mmproj_model."
+                }),
+                "mmproj_model": ("MODEL", {
+                    "tooltip": "Vision projector model (mmproj) for multimodal. Required when using image input."
+                }),
+                "system_prompt": ("STRING", {
+                    "default": "",
+                    "tooltip": "System prompt to set model behavior/persona."
+                }),
+                "stop_string": ("STRING", {
+                    "default": "",
+                    "tooltip": "Stop sequence to end generation. E.g., '</s>' or '\\n\\n'"
+                }),
             },
         }
 
     RETURN_TYPES = ("STRING",)
     FUNCTION = "inference_llamacpp_server"
     CATEGORY = "🦙 ComfyUI-LLama"
-    DESCRIPTION = "Server-based Llama inference using llama-server.exe. Faster than CLI for multimodal models. Supports text and image inputs via HTTP API."
+    DESCRIPTION = """Server-based Llama inference using llama-server.exe.
+
+🔗 **Inputs:**
+• gguf_model: Connect from GGUF Loader node
+• config: Connect from ServerConfig node (sampling params)
+• prompt: Your main prompt text
+• text_input: Optional additional text from other nodes
+
+🖼️ **Multimodal:**
+• image: Connect image for vision models
+• mmproj_model: Required vision projector for image input
+
+💡 **Tips:**
+• All sampling params are in the ServerConfig node
+• Use external INT nodes to override ctx_size/n_predict limits"""
 
     def inference_llamacpp_server(
         self,
-        prefix,
         gguf_model,
-        temperature,
-        seed,
-        n_gpu_layers,
-        ctx_size,
-        server_port,
-        repeat_penalty,
-        llama_cpp_folder=r"d:\Apps\llama-cuda",
+        config,
+        prompt,
         text_input=None,
         image=None,
-        audio=None,
-        media_paths=None,
         mmproj_model=None,
-        stop_string="",
-        n_predict=-1,
-        use_jinja=False,
-        jinja_chat_template="",
         system_prompt="",
+        stop_string="",
     ):
         # Combine text inputs
-        final_prompt = prefix
+        final_prompt = prompt
         if text_input:
             if final_prompt:
                 final_prompt = f"{final_prompt}\n{text_input}"
             else:
                 final_prompt = text_input
 
-        # For now, only support image input, not audio or media_paths
-        if audio is not None or media_paths is not None:
-            return ("Error: Audio and media_paths inputs not yet supported in server mode. Use image input only.",)
-
-        # Call the improved run_inference method
+        # Call run_inference with config
         return self.run_inference(
             gguf_model=gguf_model,
-            llama_cpp_folder=llama_cpp_folder,
-            server_port=server_port,
+            config=config,
             prompt=final_prompt,
-            n_gpu_layers=n_gpu_layers,
-            ctx_size=ctx_size,
-            temperature=temperature,
-            max_tokens=n_predict if n_predict != -1 else -1,
-            repeat_penalty=repeat_penalty,
             image=image,
             mmproj_model=mmproj_model,
             system_prompt=system_prompt,
             stop_string=stop_string,
-            seed=seed
         )
 
 
@@ -446,6 +747,7 @@ class ComfyLLamaPromptBuilder:
 
 
 NODE_CLASS_MAPPINGS = {
+    "ComfyLLamaServerConfig": ComfyLLamaServerConfig,
     "ComfyLLamaServer": ComfyLLamaServer,
     "ComfyLLamaTextInput": ComfyLLamaTextInput,
     "ComfyLLamaTextConcat": ComfyLLamaTextConcat,
@@ -455,6 +757,7 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
+    "ComfyLLamaServerConfig": "⚙️ Server Config",
     "ComfyLLamaServer": "🦙 LLama Server",
     "ComfyLLamaTextInput": "📝 Text Input",
     "ComfyLLamaTextConcat": "🔗 Text Concat",
