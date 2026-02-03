@@ -1,7 +1,6 @@
-# ComfyUI_LLama - llama.cpp integration for ComfyUI
-# Provides LLM inference nodes using llama-server
+# ComfyUI_LLama - LLM integration for ComfyUI
+# Supports both llama.cpp (GGUF) and HuggingFace models
 
-from .llamacpp_inference_deprecated import ComfyLLama  # Deprecated CLI node
 from .gguf_loader import GGUFLoader
 from .media_paths_loader import MediaPathsLoader
 from .llamacpp_inference_server import (
@@ -13,31 +12,45 @@ from .llamacpp_inference_server import (
     ComfyLLamaSaveText,
     ComfyLLamaPromptBuilder,
 )
+from .hf_model_loader import HFModelLoader, HFModelUnloader
+from .hf_inference import HFVLInference, HFTextInference
 
 NODE_CLASS_MAPPINGS = {
-    "ComfyLLama": ComfyLLama,
+    # GGUF / llama.cpp nodes
     "GGUFLoader": GGUFLoader,
     "MediaPathsLoader": MediaPathsLoader,
     "ComfyLLamaServerConfig": ComfyLLamaServerConfig,
     "ComfyLLamaServer": ComfyLLamaServer,
+    # Text utility nodes
     "ComfyLLamaTextInput": ComfyLLamaTextInput,
     "ComfyLLamaTextConcat": ComfyLLamaTextConcat,
     "ComfyLLamaPreviewText": ComfyLLamaPreviewText,
     "ComfyLLamaSaveText": ComfyLLamaSaveText,
     "ComfyLLamaPromptBuilder": ComfyLLamaPromptBuilder,
+    # HuggingFace nodes
+    "HFModelLoader": HFModelLoader,
+    "HFModelUnloader": HFModelUnloader,
+    "HFVLInference": HFVLInference,
+    "HFTextInference": HFTextInference,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "ComfyLLama": "🦙 ComfyUI-LLama CLI [Deprecated]",
-    "GGUFLoader": "📦 ComfyUI-LLama GGUF Loader",
-    "MediaPathsLoader": "🖼️ ComfyUI-LLama Media Paths",
-    "ComfyLLamaServerConfig": "⚙️ ComfyUI-LLama Server Config",
-    "ComfyLLamaServer": "🦙 ComfyUI-LLama Server",
-    "ComfyLLamaTextInput": "📝 ComfyUI-LLama Text Input",
-    "ComfyLLamaTextConcat": "🔗 ComfyUI-LLama Text Concat",
-    "ComfyLLamaPreviewText": "👁️ ComfyUI-LLama Preview Text",
-    "ComfyLLamaSaveText": "💾 ComfyUI-LLama Save Text",
-    "ComfyLLamaPromptBuilder": "🛠️ ComfyUI-LLama Prompt Builder",
+    # GGUF / llama.cpp
+    "GGUFLoader": "📦 GGUF Loader",
+    "MediaPathsLoader": "🖼️ Media Paths",
+    "ComfyLLamaServerConfig": "⚙️ LLama Server Config",
+    "ComfyLLamaServer": "🦙 LLama Server (GGUF)",
+    # Text utilities
+    "ComfyLLamaTextInput": "📝 Text Input",
+    "ComfyLLamaTextConcat": "🔗 Text Concat",
+    "ComfyLLamaPreviewText": "👁️ Preview Text",
+    "ComfyLLamaSaveText": "💾 Save Text",
+    "ComfyLLamaPromptBuilder": "🛠️ Prompt Builder",
+    # HuggingFace
+    "HFModelLoader": "🤗 HF Model Loader",
+    "HFModelUnloader": "🗑️ HF Model Unloader",
+    "HFVLInference": "🤗 HF Vision-Language",
+    "HFTextInference": "🤗 HF Text Generation",
 }
 
 # WEB_DIRECTORY is the comfyui nodes directory that ComfyUI will link and auto-load.
