@@ -1,0 +1,13 @@
+# Core dependencies
+torch
+torchvision
+pillow
+numpy
+requests
+
+# HuggingFace (optional - for HF model loading)
+# huggingface-hub>=0.20.0  # for snapshot_download
+# transformers>=4.40.0
+# accelerate
+# bitsandbytes  # for 4-bit/8-bit quantization
+# flash-attn    # optional, for faster inference
