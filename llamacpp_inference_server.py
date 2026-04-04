@@ -1,5 +1,8 @@
 import os
+import sys
+import shutil
 import subprocess
+import tempfile
 import time
 import socket
 import io
@@ -12,8 +15,18 @@ import folder_paths
 from PIL import Image
 
 
+def _llama_server_binary(llama_cpp_folder: str) -> str:
+    """Return the absolute path to llama-server, auto-discovering from PATH when folder is blank."""
+    binary_name = "llama-server.exe" if sys.platform == "win32" else "llama-server"
+    if llama_cpp_folder:
+        return os.path.join(llama_cpp_folder, binary_name)
+    # Try to find in PATH
+    found = shutil.which(binary_name)
+    return found if found else binary_name  # fall back to bare name so error message is readable
+
+
 class ComfyLLamaServerConfig:
-    """Configuration node for llama-server sampling parameters.
+    """Configuration node for llama-server settings.
     
     Separates server/sampling configuration from the main inference node
     for better organization and reusability.
@@ -25,8 +38,12 @@ class ComfyLLamaServerConfig:
             "required": {
                 # === Server Settings ===
                 "llama_cpp_folder": ("STRING", {
-                    "default": r"d:\Apps\llama-cuda",
-                    "tooltip": "Path to llama.cpp folder containing llama-server.exe"
+                    "default": r"d:\Apps\llama-cuda" if sys.platform == "win32" else "",
+                    "tooltip": (
+                        "Folder containing the llama-server binary. "
+                        "Leave empty to auto-detect from PATH (Linux/macOS). "
+                        "Windows example: d:\\Apps\\llama-cuda"
+                    ),
                 }),
                 "server_port": ("INT", {
                     "default": 8080, 
@@ -46,7 +63,19 @@ class ComfyLLamaServerConfig:
                 "n_predict": ("INT", {
                     "default": -1, 
                     "min": -2,
-                    "tooltip": "-1 = infinite (until EOS), -2 = fill context, 0+ = exact token limit. No max limit."
+                    "tooltip": "-1 or 0 = until EOS (recommended), -2 = use remaining context (25% of ctx_size), N > 0 = exact token limit (auto-capped to 25% of ctx_size to prevent overflow)"
+                }),
+                "reasoning_budget": ("INT", {
+                    "default": -1,
+                    "min": -1,
+                    "tooltip": (
+                        "Controls reasoning/thinking for thinking models (Qwen3-VL, DeepSeek-R1, etc.).\n"
+                        "Passed to llama-server as --reasoning-budget N on startup.\n"
+                        "\n"
+                        "  -1 = unlimited thinking (default)\n"
+                        "   0 = disable thinking entirely\n"
+                        "  N>0 = token budget (experimental)"
+                    ),
                 }),
                 
                 # === Basic Sampling ===
@@ -79,7 +108,7 @@ class ComfyLLamaServerConfig:
                 
                 # === Anti-Repetition ===
                 "repeat_penalty": ("FLOAT", {
-                    "default": 1.3, 
+                    "default": 1.1, 
                     "min": 1.0, 
                     "max": 3.0, 
                     "step": 0.05,
@@ -133,7 +162,28 @@ class ComfyLLamaServerConfig:
                 }),
             },
             "optional": {
-                # === Advanced ===
+                # === Hardware Tuning ===
+                "kv_cache_type": (["f16", "q8_0", "q4_0", "q4_1", "q5_0", "q5_1", "iq4_nl"], {
+                    "default": "f16",
+                    "tooltip": (
+                        "KV cache quantization type. Reduces VRAM at slight precision cost.\n"
+                        "f16 = full precision (default, safest)\n"
+                        "q8_0 = 8-bit, good quality/VRAM balance\n"
+                        "q4_0 = 4-bit, ~50% VRAM reduction (recommended for long-ctx models)\n"
+                        "Applied to both K and V caches."
+                    ),
+                }),
+                "batch_size": ("INT", {
+                    "default": 2048,
+                    "min": 1,
+                    "tooltip": "Prompt processing batch size (--batch-size). Higher = faster prompt ingestion, more VRAM."
+                }),
+                "ubatch_size": ("INT", {
+                    "default": 512,
+                    "min": 1,
+                    "tooltip": "Micro-batch size for generation (--ubatch-size). Usually batch_size/4."
+                }),
+                # === Advanced Sampling ===
                 "seed": ("INT", {
                     "default": -1,
                     "tooltip": "-1 = random seed each run. Set specific value for reproducible outputs."
@@ -165,22 +215,6 @@ class ComfyLLamaServerConfig:
                     "step": 0.01,
                     "tooltip": "Mirostat learning rate. How fast it adapts."
                 }),
-                # === Chat Template ===
-                "use_jinja": ("BOOLEAN", {
-                    "default": True,
-                    "tooltip": "Enable Jinja2 chat template processing. Recommended for chat models."
-                }),
-                "chat_template": (["auto", "chatml", "llama2", "llama3", "gemma", "phi3", "phi4", 
-                                   "mistral-v1", "mistral-v3", "deepseek", "deepseek2", "deepseek3",
-                                   "command-r", "vicuna", "zephyr", "openchat", "falcon3", "exaone3"], {
-                    "default": "auto",
-                    "tooltip": "Chat template format. 'auto' = detect from model metadata. Use specific template if auto-detection fails."
-                }),
-                "custom_chat_template": ("STRING", {
-                    "default": "",
-                    "multiline": False,
-                    "tooltip": "Custom Jinja2 chat template. Overrides chat_template if provided. Leave empty to use preset."
-                }),
             },
         }
     
@@ -188,7 +222,15 @@ class ComfyLLamaServerConfig:
     RETURN_NAMES = ("config",)
     FUNCTION = "create_config"
     CATEGORY = "🦙 ComfyUI-LLama"
-    DESCRIPTION = """Server configuration for llama-server.exe.
+    DESCRIPTION = """Server configuration for llama-server.
+
+🌐 **Cross-platform binary discovery:**
+• Windows: Set llama_cpp_folder to e.g. d:\\Apps\\llama-cuda
+• Linux/macOS: Leave empty to auto-detect from PATH, or provide the folder
+
+🧠 **Thinking models (Qwen3-VL, DeepSeek-R1, etc.):**
+• reasoning_budget=-1 → unlimited thinking (default)
+• reasoning_budget=0  → disable thinking entirely
 
 📌 **Quick Presets:**
 • Creative Writing: temp=0.8, repeat_penalty=1.2, dry=0.5
@@ -199,9 +241,10 @@ class ComfyLLamaServerConfig:
 • Output repeating? → Increase dry_multiplier, repeat_penalty
 • Output too random? → Lower temperature, increase top_k
 • Output cut off? → Increase n_predict or set to -1
-• Out of VRAM? → Lower ctx_size or n_gpu_layers
+• Out of VRAM? → Lower ctx_size or use kv_cache_type=q4_0
 
 💡 **Tips:**
+• Chat template settings (jinja, custom template) are configured in the GGUF Loader node
 • ctx_size and n_predict have no max limit - depends on your GPU
 • Use external INT nodes to pipe custom values if needed"""
 
@@ -212,6 +255,7 @@ class ComfyLLamaServerConfig:
         n_gpu_layers,
         ctx_size,
         n_predict,
+        reasoning_budget,
         temperature,
         top_k,
         top_p,
@@ -224,23 +268,28 @@ class ComfyLLamaServerConfig:
         dry_base,
         dry_allowed_length,
         dry_penalty_last_n,
+        kv_cache_type="f16",
+        batch_size=2048,
+        ubatch_size=512,
         seed=-1,
         typical_p=1.0,
         mirostat=0,
         mirostat_tau=5.0,
         mirostat_eta=0.1,
-        use_jinja=True,
-        chat_template="auto",
-        custom_chat_template="",
     ):
         config = {
-            # Server
+            # Server hardware
             "llama_cpp_folder": llama_cpp_folder,
             "server_port": server_port,
             "n_gpu_layers": n_gpu_layers,
             "ctx_size": ctx_size,
             "n_predict": n_predict,
-            # Basic
+            "reasoning_budget": reasoning_budget,
+            # KV cache & batch
+            "kv_cache_type": kv_cache_type,
+            "batch_size": batch_size,
+            "ubatch_size": ubatch_size,
+            # Basic sampling
             "temperature": temperature,
             "top_k": top_k,
             "top_p": top_p,
@@ -255,16 +304,12 @@ class ComfyLLamaServerConfig:
             "dry_base": dry_base,
             "dry_allowed_length": dry_allowed_length,
             "dry_penalty_last_n": dry_penalty_last_n,
-            # Advanced
+            # Advanced sampling
             "seed": seed,
             "typical_p": typical_p,
             "mirostat": mirostat,
             "mirostat_tau": mirostat_tau,
             "mirostat_eta": mirostat_eta,
-            # Chat Template
-            "use_jinja": use_jinja,
-            "chat_template": chat_template,
-            "custom_chat_template": custom_chat_template,
         }
         return (config,)
 
@@ -274,6 +319,20 @@ class ComfyLLamaServer:
     
     Server-based version for potentially better performance and API compatibility.
     """
+
+    def _strip_thinking_tags(self, text: str) -> str:
+        """Strip <think>...</think> blocks from model output.
+        
+        With --reasoning-budget -1: server extracts thinking → reasoning_content,
+        content is already clean. This handles the case where thinking leaks into content.
+        """
+        if '</think>' in text:
+            # Take everything after the last </think> tag
+            return text.split('</think>')[-1].strip()
+        # If only <think> opening (no close), strip the opening tag too
+        if text.startswith('<think>'):
+            return text[len('<think>'):].strip()
+        return text
 
     def _resolve_path(self, model_input):
         if isinstance(model_input, str):
@@ -306,122 +365,170 @@ class ComfyLLamaServer:
             
         return encoded_images
 
-    def _wait_for_port_free(self, port):
-        """Ensures the port is free before trying to bind."""
-        timeout = 5
-        start = time.time()
-        while time.time() - start < timeout:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                if s.connect_ex(('localhost', port)) != 0:
-                    return # Port is free
-            time.sleep(0.5)
-        print(f"Warning: Port {port} seems busy, attempting to start anyway...")
+    def _is_port_free(self, port: int) -> bool:
+        """Return True when nothing is listening on the given port."""
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            return s.connect_ex(('127.0.0.1', port)) != 0
 
-    def run_inference(self, gguf_model, config, prompt, 
-                     image=None, mmproj_model=None, system_prompt="", stop_string=""):
+    def _find_free_port(self, preferred: int, search_range: int = 20) -> int:
+        """Return the preferred port if free, otherwise the first free port in range."""
+        if self._is_port_free(preferred):
+            return preferred
+        print(f"ComfyLLama: Port {preferred} busy, searching for a free port...")
+        for offset in range(1, search_range + 1):
+            candidate = preferred + offset
+            if self._is_port_free(candidate):
+                print(f"ComfyLLama: Using port {candidate} instead.")
+                return candidate
+        raise RuntimeError(
+            f"No free port found in range {preferred}–{preferred + search_range}. "
+            "Stop other processes or change server_port."
+        )
+
+    def _kill_process(self, proc) -> None:
+        """Terminate a subprocess gracefully, escalating to SIGKILL / kill() as needed."""
+        try:
+            if sys.platform != "win32":
+                import signal, os as _os
+                try:
+                    _os.killpg(_os.getpgid(proc.pid), signal.SIGTERM)
+                except Exception:
+                    proc.terminate()
+            else:
+                proc.terminate()
+            proc.wait(timeout=5)
+        except Exception:
+            try:
+                proc.kill()
+                proc.wait(timeout=3)
+            except Exception:
+                pass
+
+    def run_inference(self, gguf_model, config, prompt,
+                     image=None, system_prompt="", stop_string=""):
         """
         Run inference with full sampling parameters from config.
-        
+
         Args:
-            gguf_model: Path to GGUF model file
-            config: Dictionary containing all server and sampling parameters
+            gguf_model: MODEL dict from GGUFLoader (may contain 'mmproj_path')
+            config: SERVER_CONFIG dict from ComfyLLamaServerConfig
             prompt: The user prompt text
-            image: Optional image tensor for multimodal
-            mmproj_model: Optional mmproj model path for vision
+            image: Optional ComfyUI IMAGE tensor for multimodal
             system_prompt: Optional system prompt
             stop_string: Optional stop sequence
         """
-        server_process = None
-        
         # Extract config values
-        llama_cpp_folder = config.get("llama_cpp_folder", r"d:\Apps\llama-cuda")
+        llama_cpp_folder = config.get("llama_cpp_folder", "")
         server_port = config.get("server_port", 8080)
         n_gpu_layers = config.get("n_gpu_layers", -1)
         ctx_size = config.get("ctx_size", 32768)
         n_predict = config.get("n_predict", -1)
         
+        server_process = None
+        stderr_log = None
         try:
-            # 1. Setup Paths
+
+            # 1. Resolve paths
             gguf_path = self._resolve_path(gguf_model)
-            mmproj_path = self._resolve_path(mmproj_model)
-
             if not gguf_path or not os.path.exists(gguf_path):
-                return (f"Error: GGUF Model not found at {gguf_path}",)
+                return (f"Error: GGUF model not found: {gguf_path}",)
 
-            server_exe = os.path.join(llama_cpp_folder, "llama-server.exe")
-            if not os.path.exists(server_exe):
-                return (f"Error: llama-server.exe not found at {server_exe}",)
+            # mmproj comes from the loader dict (preferred) — no separate input node needed
+            mmproj_path = gguf_model.get('mmproj_path') if isinstance(gguf_model, dict) else None
+
+            server_exe = _llama_server_binary(llama_cpp_folder)
+            if not os.path.isfile(server_exe):
+                binary_name = os.path.basename(server_exe)
+                found_in_path = shutil.which(binary_name)
+                if not found_in_path:
+                    return (f"Error: llama-server binary not found. "
+                            f"Tried: '{server_exe}'. Set llama_cpp_folder or add it to PATH.",)
+                server_exe = found_in_path
+
+            # Auto-select a free port
+            server_port = self._find_free_port(server_port)
 
             # 2. Process Images (if any)
             image_data = []
             if image is not None:
                 if not mmproj_path:
-                    return ("Error: Image input detected but no mmproj_model provided.",)
+                    return ("Error: Image input requires an mmproj model. "
+                            "Select mmproj_name in the GGUF Loader node.",)
                 image_data = self._tensor_to_base64(image)
 
-            # 3. Build Command with sampling params
+            # 3. Build Command — hardware and model loading only (no sampling params)
             cmd = [
                 server_exe,
                 "-m", gguf_path,
                 "--port", str(server_port),
                 "--ctx-size", str(ctx_size),
                 "--n-gpu-layers", str(n_gpu_layers),
-                "--threads", "-1",
-                "--flash-attn", "auto",
-                # Sampling params on server startup
-                "--temp", str(config.get("temperature", 0.6)),
-                "--top-k", str(config.get("top_k", 40)),
-                "--top-p", str(config.get("top_p", 0.9)),
-                "--min-p", str(config.get("min_p", 0.05)),
-                "--repeat-penalty", str(config.get("repeat_penalty", 1.3)),
-                "--repeat-last-n", str(config.get("repeat_last_n", 256)),
-                "--frequency-penalty", str(config.get("frequency_penalty", 0.1)),
-                "--presence-penalty", str(config.get("presence_penalty", 0.1)),
-                # DRY sampling
-                "--dry-multiplier", str(config.get("dry_multiplier", 0.8)),
-                "--dry-base", str(config.get("dry_base", 1.75)),
-                "--dry-allowed-length", str(config.get("dry_allowed_length", 2)),
-                "--dry-penalty-last-n", str(config.get("dry_penalty_last_n", -1)),
+                "--flash-attn", "on",
+                "--batch-size", str(config.get("batch_size", 2048)),
+                "--ubatch-size", str(config.get("ubatch_size", 512)),
             ]
-            
-            # Add mirostat if enabled
-            mirostat = config.get("mirostat", 0)
-            if mirostat > 0:
+
+            # KV cache quantization — always apply both k and v together
+            kv_cache_type = config.get("kv_cache_type", "f16")
+            if kv_cache_type and kv_cache_type != "f16":
                 cmd.extend([
-                    "--mirostat", str(mirostat),
-                    "--mirostat-ent", str(config.get("mirostat_tau", 5.0)),
-                    "--mirostat-lr", str(config.get("mirostat_eta", 0.1)),
+                    "--cache-type-k", kv_cache_type,
+                    "--cache-type-v", kv_cache_type,
                 ])
             
-            # Add typical_p if not disabled
-            typical_p = config.get("typical_p", 1.0)
-            if typical_p < 1.0:
-                cmd.extend(["--typical", str(typical_p)])
-            
-            # Add chat template settings
-            use_jinja = config.get("use_jinja", True)
-            if use_jinja:
-                cmd.append("--jinja")
-            
-            chat_template = config.get("chat_template", "auto")
-            custom_chat_template = config.get("custom_chat_template", "")
-            
-            # Use custom template if provided, otherwise use preset (if not auto)
+            # Add chat template settings — from gguf_model dict (set in GGUF Loader)
+            model_dict = gguf_model if isinstance(gguf_model, dict) else {}
+            use_jinja = model_dict.get("use_jinja", True)
+            chat_template = model_dict.get("chat_template", "auto")
+            custom_chat_template = model_dict.get("custom_chat_template", "").strip()
+
+            # custom_chat_template can be:
+            #   a) a path to a .jinja file  →  use --chat-template-file <path>
+            #   b) an inline Jinja2 string  →  use --chat-template <string>
+            # In both cases --jinja must be present.
             if custom_chat_template:
-                cmd.extend(["--chat-template", custom_chat_template])
-            elif chat_template != "auto":
-                cmd.extend(["--chat-template", chat_template])
+                cmd.append("--jinja")
+                if os.path.isfile(custom_chat_template):
+                    cmd.extend(["--chat-template-file", custom_chat_template])
+                    print(f"ComfyLLama: Using chat template file: {custom_chat_template}")
+                else:
+                    cmd.extend(["--chat-template", custom_chat_template])
+            else:
+                # No custom template — respect use_jinja and the preset dropdown
+                if use_jinja:
+                    cmd.append("--jinja")
+                if chat_template != "auto":
+                    cmd.extend(["--chat-template", chat_template])
             
             # Only load mmproj if image is provided
             if mmproj_path and image is not None:
                 cmd.extend(["--mmproj", mmproj_path])
 
-            # 4. Start Server
-            self._wait_for_port_free(server_port)
-            
+            # Reasoning budget — always pass explicitly so behavior is predictable
+            # -1 = unlimited thinking, 0 = disable thinking, N>0 = token cap (experimental)
+            reasoning_budget = config.get("reasoning_budget", -1)
+            cmd.extend(["--reasoning-budget", str(reasoning_budget)])
+
+            # 4. Start Server — capture stderr to a temp file so we can show it on crash
+            stderr_log = tempfile.NamedTemporaryFile(
+                mode='w', suffix='.log', prefix='llama_server_',
+                delete=False
+            )
             print(f"ComfyLLama: Starting One-Shot Server on port {server_port}...")
             print(f"ComfyLLama: Command: {' '.join(cmd)}")
-            server_process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, text=True, cwd=os.path.dirname(server_exe))
+            popen_kwargs = {
+                "stdout": subprocess.DEVNULL,
+                "stderr": stderr_log,
+                "text": True,
+                "cwd": os.path.dirname(server_exe) or None,
+            }
+            if sys.platform == "win32":
+                popen_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+            else:
+                # New process group so we can cleanly kill the whole tree
+                popen_kwargs["start_new_session"] = True
+            server_process = subprocess.Popen(cmd, **popen_kwargs)
 
             # 5. Wait for Health Check (Model Loading)
             load_timeout = 300 if mmproj_path else 120
@@ -430,7 +537,17 @@ class ComfyLLamaServer:
             print(f"ComfyLLama: Waiting up to {load_timeout} seconds for model to load...")
             while time.time() - start_time < load_timeout:
                 if server_process.poll() is not None:
-                    return ("Server crashed during startup.",)
+                    # Read crash output from the stderr log
+                    crash_msg = "Server crashed during startup."
+                    try:
+                        stderr_log.flush()
+                        with open(stderr_log.name, 'r') as f:
+                            tail = f.read()[-2000:]
+                        if tail.strip():
+                            crash_msg += f"\n--- llama-server output ---\n{tail}"
+                    except Exception:
+                        pass
+                    return (crash_msg,)
                 
                 try:
                     response = requests.get(f"http://localhost:{server_port}/health", timeout=1)
@@ -438,6 +555,8 @@ class ComfyLLamaServer:
                         server_ready = True
                         print("ComfyLLama: Model loaded successfully!")
                         break
+                    # Server started but model still loading (e.g. 503) — wait a bit
+                    time.sleep(1)
                 except:
                     time.sleep(1)
             
@@ -457,67 +576,104 @@ class ComfyLLamaServer:
             
             messages.append({"role": "user", "content": user_content})
             
-            # Build payload with all sampling params
+            # 75 % of ctx_size is reserved for the prompt;
+            # the remaining 25 % is available for generation output.
+            # truncate_prompt_tokens tells llama-server to trim the input if it
+            # would exceed this many tokens, preventing silent context overflow.
+            prompt_token_limit = max(128, int(ctx_size * 0.75))
+            # Maximum tokens the model can generate (at most the space left after prompt).
+            generation_budget = max(64, ctx_size - prompt_token_limit)
+
+            # Sanitize n_predict for the /chat/completions API:
+            #   -1  → unlimited (fine, send as-is)
+            #   -2  → "fill context" (llama.cpp CLI flag, not valid in HTTP API;
+            #          translate to the remaining context space)
+            #   0   → would generate nothing — treat as unlimited
+            #   >0  → explicit token limit; cap to generation_budget to avoid overflow
+            if n_predict == -2:
+                api_n_predict = generation_budget
+            elif n_predict == 0 or n_predict == -1:
+                api_n_predict = -1   # let the model run to EOS within context
+            else:
+                api_n_predict = min(n_predict, generation_budget)
+
+            # Build payload — sampling params passed per-request for flexibility
             payload = {
                 "messages": messages,
-                "n_predict": n_predict,
+                "n_predict": api_n_predict,
+                "truncate_prompt_tokens": prompt_token_limit,
                 "stop": [stop_string] if stop_string else [],
-                # Sampling params (override server defaults if needed)
-                "temperature": config.get("temperature", 0.6),
-                "top_k": config.get("top_k", 40),
-                "top_p": config.get("top_p", 0.9),
-                "min_p": config.get("min_p", 0.05),
-                "repeat_penalty": config.get("repeat_penalty", 1.3),
-                "repeat_last_n": config.get("repeat_last_n", 256),
+                # Basic sampling
+                "temperature":       config.get("temperature", 0.6),
+                "top_k":             config.get("top_k", 40),
+                "top_p":             config.get("top_p", 0.9),
+                "min_p":             config.get("min_p", 0.05),
+                # Repetition penalties
+                "repeat_penalty":    config.get("repeat_penalty", 1.1),
+                "repeat_last_n":     config.get("repeat_last_n", 256),
                 "frequency_penalty": config.get("frequency_penalty", 0.1),
-                "presence_penalty": config.get("presence_penalty", 0.1),
-                # DRY
-                "dry_multiplier": config.get("dry_multiplier", 0.8),
-                "dry_base": config.get("dry_base", 1.75),
-                "dry_allowed_length": config.get("dry_allowed_length", 2),
-                "dry_penalty_last_n": config.get("dry_penalty_last_n", -1),
+                "presence_penalty":  config.get("presence_penalty", 0.1),
+                # DRY sampling
+                "dry_multiplier":    config.get("dry_multiplier", 0.8),
+                "dry_base":          config.get("dry_base", 1.75),
+                "dry_allowed_length":config.get("dry_allowed_length", 2),
+                "dry_penalty_last_n":config.get("dry_penalty_last_n", -1),
             }
-            
-            # Add seed if specified
+
+            # Optional params
             seed = config.get("seed", -1)
             if seed != -1:
                 payload["seed"] = seed
-            
-            # Add mirostat to payload if enabled
+
+            typical_p = config.get("typical_p", 1.0)
+            if typical_p < 1.0:
+                payload["typical_p"] = typical_p
+
+            mirostat = config.get("mirostat", 0)
             if mirostat > 0:
                 payload["mirostat"] = mirostat
                 payload["mirostat_tau"] = config.get("mirostat_tau", 5.0)
                 payload["mirostat_eta"] = config.get("mirostat_eta", 0.1)
-            
-            # Add typical_p if not disabled
-            if typical_p < 1.0:
-                payload["typical_p"] = typical_p
 
             print("ComfyLLama: Sending prompt...")
             response = requests.post(f"http://localhost:{server_port}/chat/completions", json=payload, timeout=600)
             
             if response.status_code == 200:
                 result = response.json()
-                return (result["choices"][0]["message"]["content"],)
+                msg = result["choices"][0]["message"]
+                content = self._strip_thinking_tags((msg.get("content") or "").strip())
+                reasoning_content = msg.get("reasoning_content") or ""
+                if not content and reasoning_content:
+                    # Thinking model used all its token budget reasoning; no answer was generated.
+                    # This happens when n_predict is too small relative to thinking depth.
+                    thinking_len = len(reasoning_content)
+                    print(f"ComfyLLama: WARNING — content empty, model spent {thinking_len} chars thinking without answering.")
+                    return (
+                        f"[No answer generated — model exhausted token budget ({thinking_len} chars) thinking.\n"
+                        f"Fix: set reasoning_budget=0 to disable thinking, or increase ctx_size/n_predict.]",
+                    )
+                return (content,)
             else:
                 return (f"Server Error {response.status_code}: {response.text}",)
 
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             return (f"Error: {e}",)
 
         finally:
-            # 7. CLEANUP - STRICT
+            # 7. CLEANUP — always release VRAM
             if server_process:
                 print("ComfyLLama: Killing server to release VRAM...")
-                try:
-                    server_process.terminate()
-                    server_process.wait(timeout=2)
-                except:
-                    try:
-                        server_process.kill()
-                    except:
-                        pass
+                self._kill_process(server_process)
                 print("ComfyLLama: Server shutdown complete.")
+            # Remove the temp stderr log file
+            if stderr_log:
+                try:
+                    stderr_log.close()
+                    os.unlink(stderr_log.name)
+                except Exception:
+                    pass
 
 
     @classmethod
@@ -542,10 +698,8 @@ class ComfyLLamaServer:
                     "tooltip": "Additional text input from other nodes. Will be appended to prompt."
                 }),
                 "image": ("IMAGE", {
-                    "tooltip": "Image input for multimodal models. Requires mmproj_model."
-                }),
-                "mmproj_model": ("MODEL", {
-                    "tooltip": "Vision projector model (mmproj) for multimodal. Required when using image input."
+                    "tooltip": "Image input for vision-language models. "
+                               "Set mmproj_name in the GGUF Loader to enable VL mode."
                 }),
                 "system_prompt": ("STRING", {
                     "default": "",
@@ -561,20 +715,32 @@ class ComfyLLamaServer:
     RETURN_TYPES = ("STRING",)
     FUNCTION = "inference_llamacpp_server"
     CATEGORY = "🦙 ComfyUI-LLama"
-    DESCRIPTION = """Server-based Llama inference using llama-server.exe.
+
+    @classmethod
+    def IS_CHANGED(cls, **kwargs):
+        # Always re-execute — inference is side-effectful (starts/stops a server)
+        # and the result depends on runtime state, not just input values.
+        return float("nan")
+    DESCRIPTION = """Server-based Llama inference using the llama-server binary.
 
 🔗 **Inputs:**
-• gguf_model: Connect from GGUF Loader node
-• config: Connect from ServerConfig node (sampling params)
-• prompt: Your main prompt text
-• text_input: Optional additional text from other nodes
+• gguf_model → GGUF Loader
+• config → ServerConfig node (all sampling params)
+• prompt: Your main prompt
+• text_input: Optional extra text from other nodes
 
-🖼️ **Multimodal:**
-• image: Connect image for vision models
-• mmproj_model: Required vision projector for image input
+🖼️ **Vision/Multimodal (VL):**
+• Pick mmproj_name in the GGUF Loader — no second loader node needed
+• Then connect an image here to enable VL mode
+
+🌐 **Cross-platform:**
+• Linux/macOS: leave llama_cpp_folder empty → auto-detect from PATH,
+  or set it to the folder containing the llama-server binary
+• Windows: set it to e.g. d:\\Apps\\llama-cuda
 
 💡 **Tips:**
-• All sampling params are in the ServerConfig node
+• Port is auto-selected if the configured port is already in use
+• Server stderr is captured and shown on crash for easier debugging
 • Use external INT nodes to override ctx_size/n_predict limits"""
 
     def inference_llamacpp_server(
@@ -584,25 +750,18 @@ class ComfyLLamaServer:
         prompt,
         text_input=None,
         image=None,
-        mmproj_model=None,
         system_prompt="",
         stop_string="",
     ):
-        # Combine text inputs
         final_prompt = prompt
         if text_input:
-            if final_prompt:
-                final_prompt = f"{final_prompt}\n{text_input}"
-            else:
-                final_prompt = text_input
+            final_prompt = f"{final_prompt}\n{text_input}" if final_prompt else text_input
 
-        # Call run_inference with config
         return self.run_inference(
             gguf_model=gguf_model,
             config=config,
             prompt=final_prompt,
             image=image,
-            mmproj_model=mmproj_model,
             system_prompt=system_prompt,
             stop_string=stop_string,
         )
